@@ -1,0 +1,64 @@
+# ---- Python (api, pipeline) ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ---- Node / Vue (capture, web) ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# PWA / build artifacts
+capture/dev-dist/
+web/dev-dist/
+
+# ---- Environment & secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Infra / data ----
+# Local PostGIS volumes, OSRM extracts, and OSM data
+infra/data/
+*.osm
+*.osm.pbf
+*.osrm*
+
+# Generated GTFS feeds
+*.gtfs
+*.gtfs.zip
+gtfs_out/
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
