@@ -1,0 +1,10 @@
+Generic single-database configuration for Alembic.
+
+The database URL is injected at runtime from app.config.settings (see env.py),
+so `sqlalchemy.url` is intentionally left blank in alembic.ini.
+
+Common commands (run from the /api directory):
+
+    alembic upgrade head          # apply all migrations
+    alembic downgrade -1          # roll back one migration
+    alembic revision --autogenerate -m "message"   # generate a new migration

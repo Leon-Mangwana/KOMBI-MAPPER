@@ -1,0 +1,39 @@
+# Local infrastructure for Kombi Route Mapper.
+#
+# Usage:
+#   docker compose up -d
+#
+# Postgres is exposed on localhost:5432 (user/pass: postgres/postgres).
+# Create a separate `kombi_test` database for running the API test suite.
+services:
+  postgis:
+    image: postgis/postgis:15-3.4
+    container_name: kombi-postgis
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kombi
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kombi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # OSRM map-matching backend. Requires a pre-built .osrm dataset in ./data;
+  # uncomment and point at your extract once the pipeline's OSRM step lands.
+  #
+  # osrm:
+  #   image: osrm/osrm-backend:v5.27.1
+  #   container_name: kombi-osrm
+  #   command: osrm-routed --algorithm mld /data/zimbabwe-latest.osrm
+  #   ports:
+  #     - "5000:5000"
+  #   volumes:
+  #     - ./data:/data
+
+volumes:
+  postgis_data:
