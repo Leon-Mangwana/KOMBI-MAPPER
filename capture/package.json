@@ -1,0 +1,27 @@
+{
+  "name": "kombi-capture",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:lan": "vite --host",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "idb": "^8.0.3",
+    "maplibre-gl": "^5.6.1",
+    "pinia": "^3.0.3",
+    "pmtiles": "^4.3.0",
+    "vue": "^3.5.18"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.5",
+    "vite-plugin-pwa": "^1.0.1",
+    "vue-tsc": "^3.0.1"
+  }
+}
