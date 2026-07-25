@@ -1,0 +1,64 @@
+:root {
+  --bg: #0b1220;
+  --surface: #0f172a;
+  --line: #1e293b;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #f87171;
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* The screen is one fixed surface; only inner panels ever scroll. */
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input {
+  font: inherit;
+}
+
+/* MapLibre's controls default to a light theme; tone them down. */
+.maplibregl-ctrl-group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: var(--line);
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgb(15 23 42 / 80%) !important;
+  color: var(--text-muted);
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--text-muted);
+}

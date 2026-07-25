@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#0f172a"/>
+  <!-- Artwork stays inside the central 80% so the maskable variant is safe. -->
+  <g fill="none" stroke="#38bdf8" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M150 372c0-58 40-72 106-72s106-14 106-72"/>
+  </g>
+  <circle cx="150" cy="372" r="34" fill="#38bdf8"/>
+  <circle cx="362" cy="228" r="34" fill="#4ade80"/>
+</svg>
