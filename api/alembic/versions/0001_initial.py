@@ -5,17 +5,19 @@ Revises:
 Create Date: 2026-07-24
 
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
+
+import geoalchemy2
+import sqlalchemy as sa
 
 from alembic import op
-import sqlalchemy as sa
-import geoalchemy2
 
 # revision identifiers, used by Alembic.
 revision: str = "0001_initial"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -28,9 +30,7 @@ def upgrade() -> None:
         sa.Column("long_name", sa.String(length=255), nullable=True),
         sa.Column(
             "geom",
-            geoalchemy2.Geometry(
-                geometry_type="LINESTRING", srid=4326, spatial_index=False
-            ),
+            geoalchemy2.Geometry(geometry_type="LINESTRING", srid=4326, spatial_index=False),
             nullable=True,
         ),
         sa.Column(
@@ -74,9 +74,7 @@ def upgrade() -> None:
         sa.Column("route_id", sa.Integer(), nullable=True),
         sa.Column(
             "matched_geom",
-            geoalchemy2.Geometry(
-                geometry_type="LINESTRING", srid=4326, spatial_index=False
-            ),
+            geoalchemy2.Geometry(geometry_type="LINESTRING", srid=4326, spatial_index=False),
             nullable=True,
         ),
         sa.Column(
@@ -85,14 +83,10 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["route_id"], ["routes.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["route_id"], ["routes.id"], ondelete="SET NULL"),
     )
     op.create_index("ix_traces_route_id", "traces", ["route_id"])
-    op.create_index(
-        "ix_traces_matched_geom", "traces", ["matched_geom"], postgresql_using="gist"
-    )
+    op.create_index("ix_traces_matched_geom", "traces", ["matched_geom"], postgresql_using="gist")
 
     op.create_table(
         "trace_points",
@@ -111,9 +105,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("trace_id", "seq", name="uq_trace_points_trace_seq"),
     )
     op.create_index("ix_trace_points_trace_id", "trace_points", ["trace_id"])
-    op.create_index(
-        "ix_trace_points_geom", "trace_points", ["geom"], postgresql_using="gist"
-    )
+    op.create_index("ix_trace_points_geom", "trace_points", ["geom"], postgresql_using="gist")
 
     op.create_table(
         "route_stops",

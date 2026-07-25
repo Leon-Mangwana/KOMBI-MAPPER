@@ -40,9 +40,7 @@ def engine():
 
 @pytest.fixture()
 def client(engine):
-    TestingSessionLocal = sessionmaker(
-        bind=engine, autoflush=False, expire_on_commit=False
-    )
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     def override_get_db():
         db = TestingSessionLocal()

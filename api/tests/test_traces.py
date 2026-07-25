@@ -36,9 +36,9 @@ def test_post_trace_creates_trace_and_points(client):
 
 
 def test_get_trace_returns_geojson_feature(client):
-    trace_id = client.post(
-        "/traces", json={"contributor": "leon", "points": SAMPLE_POINTS}
-    ).json()["id"]
+    trace_id = client.post("/traces", json={"contributor": "leon", "points": SAMPLE_POINTS}).json()[
+        "id"
+    ]
 
     resp = client.get(f"/traces/{trace_id}")
 

@@ -37,9 +37,7 @@ class Route(Base):
     short_name: Mapped[str | None] = mapped_column(String(255))
     long_name: Mapped[str | None] = mapped_column(String(255))
     geom = mapped_column(Geometry("LINESTRING", srid=4326, spatial_index=False))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     traces: Mapped[list[Trace]] = relationship(back_populates="route")
     route_stops: Mapped[list[RouteStop]] = relationship(
@@ -57,9 +55,7 @@ class Stop(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str | None] = mapped_column(String(255))
     geom = mapped_column(Geometry("POINT", srid=4326, spatial_index=False), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     route_stops: Mapped[list[RouteStop]] = relationship(back_populates="stop")
 
@@ -79,9 +75,7 @@ class Trace(Base):
         ForeignKey("routes.id", ondelete="SET NULL"), index=True
     )
     matched_geom = mapped_column(Geometry("LINESTRING", srid=4326, spatial_index=False))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     route: Mapped[Route | None] = relationship(back_populates="traces")
     points: Mapped[list[TracePoint]] = relationship(
@@ -90,9 +84,7 @@ class Trace(Base):
         order_by="TracePoint.seq",
     )
 
-    __table_args__ = (
-        Index("ix_traces_matched_geom", "matched_geom", postgresql_using="gist"),
-    )
+    __table_args__ = (Index("ix_traces_matched_geom", "matched_geom", postgresql_using="gist"),)
 
 
 class TracePoint(Base):
@@ -131,6 +123,4 @@ class RouteStop(Base):
     route: Mapped[Route] = relationship(back_populates="route_stops")
     stop: Mapped[Stop] = relationship(back_populates="route_stops")
 
-    __table_args__ = (
-        UniqueConstraint("route_id", "seq", name="uq_route_stops_route_seq"),
-    )
+    __table_args__ = (UniqueConstraint("route_id", "seq", name="uq_route_stops_route_seq"),)
