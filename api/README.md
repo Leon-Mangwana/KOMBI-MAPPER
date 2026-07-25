@@ -60,6 +60,20 @@ export TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/k
 pytest
 ```
 
+## CORS
+
+The capture PWA uploads traces with `fetch()` from its own origin, so that
+origin must be allowed or the browser blocks the request. Set `CORS_ORIGINS` in
+`.env` (comma-separated); it defaults to the Vite dev server and `vite preview`:
+
+```
+CORS_ORIGINS=http://localhost:5173,http://localhost:4173
+```
+
+Testing capture on a phone through a tunnel means adding that URL too, e.g.
+`https://something.trycloudflare.com`. Credentials are not allowed — uploads
+carry no cookies or auth headers.
+
 ## Notes
 
 - Geometry is stored as EPSG:4326. Reproject to EPSG:32736 (UTM 36S) for any

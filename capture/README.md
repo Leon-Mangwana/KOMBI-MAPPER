@@ -16,9 +16,10 @@ cp .env.example .env    # point VITE_API_BASE_URL at the API
 npm run dev
 ```
 
-The API must allow this origin via CORS. With the API on `localhost:8000` and
-this app on `localhost:5173`, add `http://localhost:5173` to the API's
-CORS origins.
+`http://localhost:5173` is already in the API's default `CORS_ORIGINS`, so the
+dev server can upload with no extra setup. Serving this app from any other
+origin (a tunnel, a deployed host) means adding that origin to `CORS_ORIGINS`
+in `api/.env`.
 
 ### Testing on a real phone
 
