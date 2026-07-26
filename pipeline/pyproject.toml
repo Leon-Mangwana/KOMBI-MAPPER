@@ -1,0 +1,40 @@
+[project]
+name = "kombi-pipeline"
+version = "0.1.0"
+description = "Trace cleaning, stop detection, clustering and GTFS export for Kombi Route Mapper."
+requires-python = ">=3.11"
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyproj>=3.6",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "matplotlib>=3.8",  # plot_trace.py only — not needed by the pipeline itself
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["clean", "stops", "config", "synthetic"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
