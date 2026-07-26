@@ -55,7 +55,10 @@ class SyntheticTrace:
 
     def true_xy(self) -> np.ndarray:
         return np.column_stack(
-            [self.truth.geometry.x.to_numpy(dtype=float), self.truth.geometry.y.to_numpy(dtype=float)]
+            [
+                self.truth.geometry.x.to_numpy(dtype=float),
+                self.truth.geometry.y.to_numpy(dtype=float),
+            ]
         )
 
 
@@ -65,6 +68,7 @@ def synthetic_trace(
     sample_hz: float = 1.0,
     speed_mps: float = 10.0,
     dwells: tuple[tuple[float, float], ...] = (),
+    accel_mps2: float | None = 1.2,
     noise_sigma_m: float = 4.0,
     reported_accuracy_m: float | None = None,
     seed: int = 0,
@@ -79,17 +83,29 @@ def synthetic_trace(
 ) -> SyntheticTrace:
     """Generate a trace that follows `waypoints`, pausing during `dwells`.
 
-    The vehicle travels the polyline at a constant `speed_mps`, except inside a
-    dwell window where it does not advance at all. Distance covered over each
-    sampling interval is the interval's length minus its overlap with any dwell
-    window, so a dwell that starts and ends on a sample boundary is reproduced
-    exactly — which is what lets the dwell tests assert durations tightly.
+    The vehicle travels the polyline at `speed_mps` and stands still inside each
+    dwell window. `accel_mps2` decides how it gets between the two:
+
+    - **Realistic (the default).** The vehicle brakes into each dwell and pulls
+      away afterwards at a finite rate, so it is already stopped when the window
+      opens and only starts moving once it closes. Use this for anything that
+      runs through `clean.clean_trace`: a constant-velocity Kalman filter fed an
+      instantaneous stop overshoots and rings, which is an artefact of the
+      fixture rather than of the filter.
+    - **Instantaneous (`accel_mps2=None`).** Speed steps between `speed_mps` and
+      zero on the sample boundary, and distance over each interval is the
+      interval's length minus its overlap with a dwell window. Physically
+      impossible — 10 m/s to a standstill inside one second is about 1 g — but
+      it reproduces the injected windows to the sample, which is what tests of
+      `detect_dwells`' boundary arithmetic want.
 
     Args:
         duration_s: Length of the recording.
         sample_hz: Sampling rate. 1 Hz is what the capture PWA targets.
         speed_mps: Travel speed while not dwelling (10 m/s ≈ 36 km/h).
         dwells: Windows of `(start_s, duration_s)` to stand still for.
+        accel_mps2: Braking and acceleration rate, or `None` for an
+            instantaneous stop. 1.2 m/s² is ordinary minibus driving.
         noise_sigma_m: 1σ of the Gaussian noise added to each axis.
         reported_accuracy_m: What the device claims its accuracy is. Defaults
             to `noise_sigma_m`, i.e. an honest device.
@@ -116,12 +132,8 @@ def synthetic_trace(
 
     path = LineString([(origin[0] + wx, origin[1] + wy) for wx, wy in waypoints])
 
-    # Cumulative distance travelled: each interval contributes only the part of
-    # itself that is not inside a dwell window.
-    travelled = np.zeros(count, dtype=float)
-    for i in range(1, count):
-        moving = _moving_seconds(seconds[i - 1], seconds[i], dwells)
-        travelled[i] = travelled[i - 1] + speed_mps * moving
+    true_speed = _speed_profile(seconds, speed_mps, dwells, accel_mps2)
+    travelled = _distance_travelled(seconds, true_speed, speed_mps, dwells, accel_mps2)
 
     if travelled[-1] > path.length:
         raise ValueError(
@@ -141,15 +153,10 @@ def synthetic_trace(
         dtype=float,
     )
 
-    # True instantaneous speed, as a well-behaved device would report it: zero
-    # while dwelling. Nothing in the pipeline reads this, but a real trace has
-    # it and its presence keeps the fixtures honest.
-    reported_speed = np.zeros(count, dtype=float)
-    for i in range(1, count):
-        gap = seconds[i] - seconds[i - 1]
-        reported_speed[i] = speed_mps if _moving_seconds(seconds[i - 1], seconds[i], dwells) > 0 else 0.0
-    if count > 1:
-        reported_speed[0] = reported_speed[1]
+    # True instantaneous speed, as a well-behaved device would report it.
+    # Nothing in the pipeline reads this, but a real trace carries it and its
+    # presence keeps the fixtures honest.
+    reported_speed = true_speed
 
     for index in bad_accuracy_indices:
         _check_index(index, count, "bad_accuracy_indices")
@@ -180,6 +187,65 @@ def synthetic_trace(
         dwells=tuple(dwells),
         dropped_indices=tuple(sorted(set(bad_accuracy_indices) | set(jump_indices))),
     )
+
+
+def _speed_profile(
+    seconds: np.ndarray,
+    speed_mps: float,
+    dwells: tuple[tuple[float, float], ...],
+    accel_mps2: float | None,
+) -> np.ndarray:
+    """True speed at each sample: cruising, zero inside a dwell, ramps between.
+
+    The ramps come from two clamping sweeps rather than from working out where
+    each braking phase begins. Forward, no sample may exceed the previous one
+    plus what `accel_mps2` allows; backward, no sample may exceed the *next* one
+    plus the same, which forces the vehicle to have begun braking early enough
+    to be stopped when the window opens. Both sweeps only ever lower a speed, so
+    the dwell windows stay at exactly zero.
+    """
+    speed = np.full(len(seconds), float(speed_mps))
+    for dwell_start, dwell_duration in dwells:
+        window = (seconds >= dwell_start) & (seconds < dwell_start + dwell_duration)
+        speed[window] = 0.0
+
+    if accel_mps2 is None:
+        return speed
+
+    for k in range(1, len(speed)):
+        speed[k] = min(speed[k], speed[k - 1] + accel_mps2 * (seconds[k] - seconds[k - 1]))
+    for k in range(len(speed) - 2, -1, -1):
+        speed[k] = min(speed[k], speed[k + 1] + accel_mps2 * (seconds[k + 1] - seconds[k]))
+
+    return speed
+
+
+def _distance_travelled(
+    seconds: np.ndarray,
+    true_speed: np.ndarray,
+    speed_mps: float,
+    dwells: tuple[tuple[float, float], ...],
+    accel_mps2: float | None,
+) -> np.ndarray:
+    """Cumulative distance along the path, integrating the speed profile exactly.
+
+    The quadrature follows the profile's shape: piecewise-linear when the ramps
+    are on, so the trapezoid rule is exact; a step function when they are off,
+    where the exact integral over an interval is the cruising speed times the
+    part of it not inside a dwell.
+    """
+    travelled = np.zeros(len(seconds), dtype=float)
+
+    if accel_mps2 is None:
+        for k in range(1, len(seconds)):
+            moving = _moving_seconds(seconds[k - 1], seconds[k], dwells)
+            travelled[k] = travelled[k - 1] + speed_mps * moving
+        return travelled
+
+    steps = np.diff(seconds)
+    increments = (true_speed[:-1] + true_speed[1:]) / 2.0 * steps
+    travelled[1:] = np.cumsum(increments)
+    return travelled
 
 
 def _moving_seconds(start: float, end: float, dwells: tuple[tuple[float, float], ...]) -> float:

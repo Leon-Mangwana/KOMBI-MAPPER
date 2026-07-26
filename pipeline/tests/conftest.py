@@ -11,17 +11,25 @@ import pytest
 from synthetic import synthetic_trace
 
 
-def rmse_against_truth(gdf, true_xy: np.ndarray) -> float:
+@pytest.fixture(scope="session")
+def rmse_against_truth():
     """Root-mean-square 2D distance between a frame and the truth positions.
 
-    `gdf` and `true_xy` must be row-aligned, so this is only valid for frames
-    where no points were dropped.
+    Exposed as a fixture rather than a plain import because `tests/` is a
+    package, so `from conftest import ...` would not resolve.
+
+    The frame and `true_xy` must be row-aligned, so this is only valid where no
+    points were dropped — compare against the surviving truth rows otherwise.
     """
-    xy = np.column_stack(
-        [gdf.geometry.x.to_numpy(dtype=float), gdf.geometry.y.to_numpy(dtype=float)]
-    )
-    assert len(xy) == len(true_xy), "frame and truth must be row-aligned"
-    return float(np.sqrt(np.mean(np.sum((xy - true_xy) ** 2, axis=1))))
+
+    def _rmse(gdf, true_xy: np.ndarray) -> float:
+        xy = np.column_stack(
+            [gdf.geometry.x.to_numpy(dtype=float), gdf.geometry.y.to_numpy(dtype=float)]
+        )
+        assert len(xy) == len(true_xy), "frame and truth must be row-aligned"
+        return float(np.sqrt(np.mean(np.sum((xy - true_xy) ** 2, axis=1))))
+
+    return _rmse
 
 
 @pytest.fixture()

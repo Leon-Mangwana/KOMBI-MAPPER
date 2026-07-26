@@ -8,7 +8,6 @@ a golden output.
 import numpy as np
 import pandas as pd
 import pytest
-from conftest import rmse_against_truth
 
 from clean import (
     MAX_ACCURACY_M,
@@ -113,7 +112,7 @@ class TestDropSpeedOutliers:
 
 
 class TestKalmanSmooth:
-    def test_reduces_error_against_known_truth(self, clean_run):
+    def test_reduces_error_against_known_truth(self, clean_run, rmse_against_truth):
         raw_rmse = rmse_against_truth(clean_run.noisy, clean_run.true_xy())
         smoothed_rmse = rmse_against_truth(kalman_smooth(clean_run.noisy), clean_run.true_xy())
 
@@ -122,7 +121,7 @@ class TestKalmanSmooth:
         # pass at 1 Hz; in practice it does considerably better.
         assert smoothed_rmse < 0.5 * raw_rmse
 
-    def test_backward_pass_beats_the_forward_filter_alone(self, clean_run):
+    def test_backward_pass_beats_the_forward_filter_alone(self, clean_run, rmse_against_truth):
         truth = clean_run.true_xy()
         forward_only = kalman_smooth(clean_run.noisy, rts_smooth=False)
         smoothed = kalman_smooth(clean_run.noisy, rts_smooth=True)
@@ -130,7 +129,7 @@ class TestKalmanSmooth:
         # The forward filter only ever sees the past, so it lags every turn.
         assert rmse_against_truth(smoothed, truth) < rmse_against_truth(forward_only, truth)
 
-    def test_tracks_a_noise_free_straight_line_almost_exactly(self):
+    def test_tracks_a_noise_free_straight_line_almost_exactly(self, rmse_against_truth):
         trace = synthetic_trace(
             duration_s=120.0,
             noise_sigma_m=0.0,
@@ -192,7 +191,7 @@ class TestKalmanSmooth:
         pd.testing.assert_series_equal(smoothed["recorded_at"], clean_run.noisy["recorded_at"])
         pd.testing.assert_series_equal(smoothed["seq"], clean_run.noisy["seq"])
 
-    def test_handles_irregular_sampling(self):
+    def test_handles_irregular_sampling(self, rmse_against_truth):
         """dt comes from the timestamps, so dropped samples are not assumed away."""
         trace = synthetic_trace(duration_s=200.0, noise_sigma_m=3.0, seed=16)
         keep = np.ones(len(trace.noisy), dtype=bool)
@@ -218,7 +217,7 @@ class TestKalmanSmooth:
 
 
 class TestCleanTrace:
-    def test_removes_every_injected_outlier_and_smooths_the_rest(self):
+    def test_removes_every_injected_outlier_and_smooths_the_rest(self, rmse_against_truth):
         trace = synthetic_trace(
             duration_s=300.0,
             noise_sigma_m=4.0,
@@ -249,7 +248,7 @@ class TestCleanTrace:
 
         assert len(clean_trace(trace.noisy, max_accuracy_m=20.0)) == 0
 
-    def test_kalman_arguments_are_forwarded(self, clean_run):
+    def test_kalman_arguments_are_forwarded(self, clean_run, rmse_against_truth):
         truth = clean_run.true_xy()
 
         loose = clean_trace(clean_run.noisy, accel_noise_mps2=5.0)

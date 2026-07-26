@@ -52,6 +52,9 @@ infra/data/
 *.gtfs.zip
 gtfs_out/
 
+# plot_trace.py inspection renders
+pipeline/*.png
+
 # ---- Logs ----
 *.log
 logs/

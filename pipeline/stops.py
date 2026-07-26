@@ -27,6 +27,11 @@ MIN_DWELL_S = 20.0
 #: ...and the vehicle must stay under this speed throughout it.
 MAX_DWELL_SPEED_MPS = 1.0
 
+#: Longest above-threshold blip that may be bridged rather than ending a dwell,
+#: and the furthest the vehicle may have got during it. See `detect_dwells`.
+MAX_GAP_S = 5.0
+MAX_GAP_M = 10.0
+
 
 @dataclass(frozen=True)
 class Dwell:
@@ -81,6 +86,8 @@ def detect_dwells(
     *,
     min_duration_s: float = MIN_DWELL_S,
     max_speed_mps: float = MAX_DWELL_SPEED_MPS,
+    max_gap_s: float = MAX_GAP_S,
+    max_gap_m: float = MAX_GAP_M,
 ) -> list[Dwell]:
     """Find every dwell event in a cleaned trace, in trace order.
 
@@ -90,14 +97,28 @@ def detect_dwells(
     span from `t[a]` to `t[b + 1]`. Attributing a speed to each point instead
     would blur the endpoints by a sample either side.
 
-    Runs are maximal — a single segment above the threshold splits a dwell in
-    two, and neither half is reported unless it independently lasts
-    `min_duration_s`.
+    **Bridging.** Taken literally, "a run of slow segments" means a single
+    segment over the threshold ends the dwell. That reads well but detects
+    badly: even after Kalman smoothing, a parked vehicle's residual noise throws
+    the occasional 1–2 m/s blip, and under a strict reading one such blip
+    shatters a 45 s stop into a 9 s and a 32 s fragment, neither of which
+    survives `min_duration_s`. Stops would then be missed exactly where traces
+    are noisiest.
+
+    So two adjacent runs are merged when the stretch between them is *both*
+    shorter than `max_gap_s` and covers less than `max_gap_m` of ground. Both
+    conditions matter, and it is the second that carries the argument: a noise
+    blip goes nowhere — the vehicle is still at the stop when it ends — whereas
+    a kombi that actually pulled away is metres down the road. Duration alone
+    could not tell those apart. Set `max_gap_s=0` for the strict reading.
 
     Args:
         gdf: Cleaned trace in EPSG:32736, ordered, with `recorded_at` set.
         min_duration_s: Shortest stretch that counts as a dwell.
         max_speed_mps: Speed the vehicle must stay under throughout.
+        max_gap_s: Longest above-threshold stretch that may be bridged.
+        max_gap_m: Furthest the vehicle may travel during a bridged stretch,
+            measured as net displacement across it.
 
     Returns:
         The dwells found, ordered by start time. Empty if the trace is shorter
@@ -120,10 +141,12 @@ def detect_dwells(
     run_starts = np.flatnonzero(edges == 1)
     run_ends = np.flatnonzero(edges == -1) - 1  # inclusive segment index
 
+    # A run of segments spans one extra point, so work in point indices from here.
+    spans = [(int(a), int(b) + 1) for a, b in zip(run_starts, run_ends, strict=True)]
+    spans = _bridge_gaps(spans, seconds, xs, ys, max_gap_s=max_gap_s, max_gap_m=max_gap_m)
+
     dwells: list[Dwell] = []
-    for first_segment, last_segment in zip(run_starts, run_ends, strict=True):
-        first = int(first_segment)
-        last = int(last_segment) + 1  # a run of segments spans one extra point
+    for first, last in spans:
         duration = float(seconds[last] - seconds[first])
         if duration < min_duration_s:
             continue
@@ -142,6 +165,37 @@ def detect_dwells(
         )
 
     return dwells
+
+
+def _bridge_gaps(
+    spans: list[tuple[int, int]],
+    seconds: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    *,
+    max_gap_s: float,
+    max_gap_m: float,
+) -> list[tuple[int, int]]:
+    """Merge adjacent slow spans separated by a brief blip that went nowhere.
+
+    Spans are inclusive point-index pairs. Merging is greedy left to right, so a
+    stop broken by two separate blips comes back as one span.
+    """
+    if not spans:
+        return []
+
+    merged = [spans[0]]
+    for first, last in spans[1:]:
+        previous_first, previous_last = merged[-1]
+        gap_duration = float(seconds[first] - seconds[previous_last])
+        gap_distance = float(np.hypot(xs[first] - xs[previous_last], ys[first] - ys[previous_last]))
+
+        if gap_duration <= max_gap_s and gap_distance <= max_gap_m:
+            merged[-1] = (previous_first, last)
+        else:
+            merged.append((first, last))
+
+    return merged
 
 
 def dwells_to_gdf(dwells: list[Dwell], crs: str = UTM36S) -> gpd.GeoDataFrame:

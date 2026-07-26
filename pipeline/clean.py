@@ -155,7 +155,7 @@ def drop_speed_outliers(
 def kalman_smooth(
     gdf: gpd.GeoDataFrame,
     *,
-    accel_noise_mps2: float = 0.7,
+    accel_noise_mps2: float = 1.0,
     default_accuracy_m: float = 10.0,
     initial_speed_sigma_mps: float = 15.0,
     rts_smooth: bool = True,
