@@ -14,6 +14,10 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/kombi"
 
+    #: Base URL of the OSRM backend used for map matching. Matches the `osrm`
+    #: service in ../infra/docker-compose.yml.
+    osrm_url: str = "http://localhost:5000"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

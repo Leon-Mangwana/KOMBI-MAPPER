@@ -5,6 +5,9 @@
 #
 # Postgres is exposed on localhost:5432 (user/pass: postgres/postgres).
 # Create a separate `kombi_test` database for running the API test suite.
+#
+# The `osrm` service needs a prepared dataset in ./data before it will start.
+# See README.md — it will not come up on a clean checkout.
 services:
   postgis:
     image: postgis/postgis:15-3.4
@@ -23,17 +26,31 @@ services:
       timeout: 5s
       retries: 10
 
-  # OSRM map-matching backend. Requires a pre-built .osrm dataset in ./data;
-  # uncomment and point at your extract once the pipeline's OSRM step lands.
+  # OSRM map-matching backend, used by pipeline/match.py.
   #
-  # osrm:
-  #   image: osrm/osrm-backend:v5.27.1
-  #   container_name: kombi-osrm
-  #   command: osrm-routed --algorithm mld /data/zimbabwe-latest.osrm
-  #   ports:
-  #     - "5000:5000"
-  #   volumes:
-  #     - ./data:/data
+  # Requires a pre-built .osrm dataset in ./data — run the one-off
+  # osrm-extract / osrm-partition / osrm-customize steps in README.md first.
+  # The prepare steps reuse this same service definition, so they always run
+  # against the image pinned here; a dataset prepared by a different OSRM
+  # version will be rejected at startup.
+  osrm:
+    image: osrm/osrm-backend:v5.27.1
+    container_name: kombi-osrm
+    # --algorithm mld must match the preparation steps (partition + customize).
+    #
+    # --max-matching-size caps coordinates per /match request. It is left at
+    # OSRM's default of 100 and stated explicitly because match.py chunks
+    # traces to exactly this number: see MAX_COORDINATES_PER_REQUEST in
+    # ../pipeline/match.py, and raise both together or neither.
+    command: >
+      osrm-routed
+      --algorithm mld
+      --max-matching-size 100
+      /data/zimbabwe-latest.osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
 
 volumes:
   postgis_data:
