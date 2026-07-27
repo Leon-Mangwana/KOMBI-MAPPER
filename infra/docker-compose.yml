@@ -34,7 +34,7 @@ services:
   # against the image pinned here; a dataset prepared by a different OSRM
   # version will be rejected at startup.
   osrm:
-    image: osrm/osrm-backend:v5.27.1
+    image: osrm/osrm-backend:v5.25.0
     container_name: kombi-osrm
     # --algorithm mld must match the preparation steps (partition + customize).
     #

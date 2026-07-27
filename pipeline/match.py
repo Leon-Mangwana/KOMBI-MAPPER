@@ -192,19 +192,18 @@ def match_trace(
     """Map-match a cleaned trace against OSRM and return the stitched line.
 
     The trace is chunked to `max_coordinates` points per request with `overlap`
-    points shared across each seam, every chunk is POSTed— see the note below —
-    to `/match/v1/{profile}`, and the matched pieces are cut and concatenated
-    into one LineString spanning the whole trace. Stretches OSRM could not match
-    are filled with the cleaned geometry and flagged on the result rather than
-    aborting the trace.
+    points shared across each seam, each chunk is sent to `/match/v1/{profile}`,
+    and the matched pieces are cut and concatenated into one LineString spanning
+    the whole trace. Stretches OSRM could not match are filled with the cleaned
+    geometry and flagged on the result rather than aborting the trace.
 
-    **On POST.** `osrm-routed` serves GET only: coordinates go in the URL path,
-    and there is no request-body form of the API to POST to. Requests here are
-    therefore `GET /match/v1/{profile}/{lon},{lat};...`. This is a property of
-    the OSRM HTTP server, not a choice — the alternative would be dropping
-    `osrm-routed` for the NodeJS or C++ bindings, which take coordinates as
-    arrays in-process. Chunking keeps URLs to roughly 4 KB, well inside what
-    `osrm-routed` accepts.
+    **Why GET and not POST.** `osrm-routed` serves GET only — coordinates go in
+    the URL path and there is no request-body form of the API to POST to — so
+    requests here are `GET /match/v1/{profile}/{lon},{lat};...`. That is a
+    property of the OSRM HTTP server rather than a choice: taking coordinates as
+    arrays instead would mean dropping `osrm-routed` for the NodeJS or C++
+    bindings and running the matcher in-process. Chunking incidentally keeps the
+    URLs small — around 4 KB with timestamps and radiuses attached.
 
     Per-point `radiuses` are derived from the device's reported `accuracy_m`,
     so a fix the phone already knew was poor is matched loosely rather than

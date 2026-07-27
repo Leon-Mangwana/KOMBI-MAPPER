@@ -5,7 +5,7 @@ Local backing services for Kombi Route Mapper, via docker-compose.
 | Service   | Image                       | Port | Purpose                                     |
 | --------- | --------------------------- | ---- | ------------------------------------------- |
 | `postgis` | `postgis/postgis:15-3.4`    | 5432 | Traces, routes and stops (the API's database) |
-| `osrm`    | `osrm/osrm-backend:v5.27.1` | 5000 | Map matching for [`../pipeline/match.py`](../pipeline/match.py) |
+| `osrm`    | `osrm/osrm-backend:v5.25.0` | 5000 | Map matching for [`../pipeline/match.py`](../pipeline/match.py) |
 
 ```bash
 cd infra
@@ -24,7 +24,10 @@ Everything below runs through `docker compose run`, so the preparation uses the
 exact image pinned in [`docker-compose.yml`](docker-compose.yml) and writes into
 the same `./data` volume the server reads. Preparing with one OSRM version and
 serving with another does not work — `osrm-routed` refuses a dataset whose file
-format does not match its own.
+format does not match its own. That is also why the image is pinned to a version
+tag rather than `latest`: `latest` is rebuilt, and a rebuild would silently
+invalidate the dataset in `./data`. `v5.25.0` is the newest versioned tag
+`osrm/osrm-backend` publishes.
 
 ### 1. Download the Zimbabwe extract
 
@@ -36,8 +39,8 @@ curl -L -o data/zimbabwe-latest.osm.pbf \
   https://download.geofabrik.de/africa/zimbabwe-latest.osm.pbf
 ```
 
-About 40 MB. `data/` is gitignored — extracts and the `.osrm.*` files built from
-them are large and reproducible, so they never get committed.
+About 180 MB as of July 2026. `data/` is gitignored — extracts and the `.osrm.*`
+files built from them are large and reproducible, so they never get committed.
 
 Optionally verify the download against Geofabrik's published checksum:
 
@@ -54,7 +57,8 @@ the box would map-match against a road network with a hole in it.
 ### 2. Extract, partition, customize
 
 ```bash
-# Build the routing graph with the car profile (~2-4 min, needs ~2 GB RAM).
+# Build the routing graph with the car profile. The slow step: budget several
+# minutes and give Docker Desktop at least 6 GB of memory.
 docker compose run --rm osrm \
   osrm-extract -p /opt/car.lua /data/zimbabwe-latest.osm.pbf
 
@@ -74,16 +78,17 @@ Notes on each step:
   Dijkstra) preprocessing passes. MLD is used rather than CH (`osrm-contract`)
   because it is far quicker to re-run when the extract is refreshed, and CH's
   faster queries do not matter at the volumes here. Whichever you pick, the
-  algorithm must match on all three of `osrm-partition`/`osrm-customize` (or
-  `osrm-contract`), `osrm-routed --algorithm`, and nothing else — the compose
-  file says `--algorithm mld`.
+  preprocessing and `osrm-routed --algorithm` must agree. Note that
+  `osrm-routed` defaults to `CH`, so serving an MLD dataset without passing
+  `--algorithm mld` fails — the compose file passes it.
 
 The path passed to `osrm-partition` and `osrm-customize` is
 `zimbabwe-latest.osrm`, not the `.osm.pbf`. That name refers to the whole family
 of `zimbabwe-latest.osrm.*` files `osrm-extract` wrote next to the input; there
 is no single file with that exact name, which is confusing the first time.
 
-Expect roughly 1 GB in `./data` when all three steps have run.
+Expect a few GB in `./data` once all three steps have run — the `.osrm.*` family
+is several times the size of the `.osm.pbf` it came from.
 
 ### 3. Start the server
 
@@ -137,7 +142,7 @@ worthwhile: informal routes often use roads that OSM only recently acquired.
 | `{"code":"TooBig","message":"Too many trace coordinates"}` | More than `--max-matching-size` coordinates in one request. The pipeline chunks to 100; if you raised the flag, raise `MAX_COORDINATES_PER_REQUEST` in [`../pipeline/match.py`](../pipeline/match.py) to match. |
 | `{"code":"NoMatch"}` on real traces | Usually genuine: the kombi used a road OSM does not have. `match_trace` logs it and falls back to the cleaned geometry for that stretch. Widen `radiuses` before assuming a broken dataset. |
 | Port 5000 already bound (macOS) | AirPlay Receiver listens on 5000. Turn it off, or remap to `"5050:5000"` and set `OSRM_URL=http://localhost:5050`. |
-| `osrm-extract` killed | Out of memory. It wants ~2 GB for Zimbabwe; raise Docker Desktop's memory limit. |
+| `osrm-extract` killed, or exits 137 | Out of memory. Raise Docker Desktop's memory limit to 6 GB or more. |
 
 ## Database
 

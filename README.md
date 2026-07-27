@@ -31,10 +31,13 @@ transit apps.
 Prerequisites: Docker, Python 3.11, Node.js.
 
 ```bash
-# 1. Bring up Postgres + PostGIS and OSRM
+# 1. Bring up Postgres + PostGIS
 cd infra
-docker compose up -d
+docker compose up -d postgis
 ```
+
+The OSRM service used for map matching needs a road network prepared from an OSM
+extract before it will start — see [infra/README.md](infra/README.md).
 
 <!-- TODO: document api, pipeline, capture, and web setup once scaffolded -->
 
