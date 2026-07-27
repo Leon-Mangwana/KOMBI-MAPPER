@@ -37,7 +37,9 @@ from synthetic import DEFAULT_ORIGIN, DEFAULT_WAYPOINTS, synthetic_trace
 OSRM_URL = "http://osrm.test"
 
 #: The road the synthetic traces are generated along, in EPSG:32736.
-ROAD = LineString([(DEFAULT_ORIGIN[0] + wx, DEFAULT_ORIGIN[1] + wy) for wx, wy in DEFAULT_WAYPOINTS])
+ROAD = LineString(
+    [(DEFAULT_ORIGIN[0] + wx, DEFAULT_ORIGIN[1] + wy) for wx, wy in DEFAULT_WAYPOINTS]
+)
 
 
 def to_wgs84(points: list[Point]) -> list[tuple[float, float]]:
@@ -123,7 +125,7 @@ def fake_osrm(
                     "legs": [],
                 }
             )
-            for position, index in enumerate(group):
+            for index in group:
                 assignment[index] = matching_index
 
         snapped = to_wgs84([road.interpolate(distance) for distance in distances])
@@ -183,10 +185,19 @@ class TestPlanChunks:
         assert (chunks[0].context_start, chunks[0].context_end) == (0, 39)
         assert (chunks[0].owned_start, chunks[0].owned_end) == (0, 39)
 
-    def test_owned_ranges_partition_the_trace_exactly_once(self):
+    def test_owned_ranges_cover_the_trace_sharing_only_their_seams(self):
         chunks = _plan_chunks(401, max_coordinates=100, overlap=10)
 
-        covered = [i for chunk in chunks for i in range(chunk.owned_start, chunk.owned_end + 1)]
+        covered: list[int] = []
+        for chunk in chunks:
+            # Consecutive chunks share the seam point deliberately: both cut
+            # their geometry there, so the two pieces meet.
+            assert not covered or chunk.owned_start == covered[-1]
+            covered.extend(
+                range(
+                    chunk.owned_start if not covered else chunk.owned_start + 1, chunk.owned_end + 1
+                )
+            )
         assert covered == list(range(401))
 
     def test_no_request_exceeds_the_coordinate_cap(self):
@@ -200,12 +211,12 @@ class TestPlanChunks:
             assert chunk.owned_end <= chunk.context_end
 
     def test_the_seam_falls_in_the_middle_of_the_overlap(self):
-        first, second = _plan_chunks(150, max_coordinates=100, overlap=20)[:2]
+        first, second = _plan_chunks(180, max_coordinates=100, overlap=20)[:2]
 
-        # Chunks overlap on 80..99; the seam is the middle of that, so both
-        # sides keep only the half they had context for.
+        # Chunks overlap on 80..99; the seam is the middle of that, so each side
+        # keeps only the half it had context for.
         assert (second.context_start, first.context_end) == (80, 99)
-        assert first.owned_end == 89
+        assert first.owned_end == 90
         assert second.owned_start == 90
 
     def test_the_last_chunk_is_not_left_as_a_short_tail(self):
@@ -214,11 +225,13 @@ class TestPlanChunks:
         assert chunks[-1].context_end - chunks[-1].context_start + 1 == 100
         assert chunks[-1].context_end == 184
 
-    def test_zero_overlap_still_partitions_the_trace(self):
+    def test_zero_overlap_still_covers_the_trace(self):
         chunks = _plan_chunks(250, max_coordinates=100, overlap=0)
 
-        covered = [i for chunk in chunks for i in range(chunk.owned_start, chunk.owned_end + 1)]
-        assert covered == list(range(250))
+        assert chunks[0].owned_start == 0
+        assert chunks[-1].owned_end == 249
+        for earlier, later in zip(chunks, chunks[1:], strict=False):
+            assert later.owned_start == earlier.owned_end
 
 
 class TestRequests:
@@ -303,7 +316,7 @@ class TestMatchedGeometry:
         result = run_match(short_trace, handler)
 
         # The cleaned trace floats metres off the road; the matched one is on it.
-        assert max_offset_from_road(short_trace.unary_union.convex_hull.exterior) > 1.0
+        assert max(ROAD.distance(point) for point in short_trace.geometry) > 1.0
         assert max_offset_from_road(result.geometry) < 1e-6
         assert result.fully_matched
         assert result.matched_fraction == pytest.approx(1.0)
@@ -391,7 +404,8 @@ class TestNoMatchFallback:
 
         for earlier, later in zip(result.segments, result.segments[1:], strict=False):
             assert earlier.end_index == later.start_index
-            assert Point(earlier.geometry.coords[-1]).distance(Point(later.geometry.coords[0])) == 0
+            join = Point(earlier.geometry.coords[-1]).distance(Point(later.geometry.coords[0]))
+            assert join < 1e-6
 
     def test_logs_the_unmatched_stretch(self, long_trace, caplog):
         handler, _ = fake_osrm(unmatched_requests=(1,))
@@ -399,7 +413,7 @@ class TestNoMatchFallback:
         with caplog.at_level(logging.WARNING, logger="match"):
             run_match(long_trace, handler)
 
-        assert any("NoMatch" in record.message % record.args for record in caplog.records)
+        assert "NoMatch" in caplog.text
 
     def test_a_wholly_unmatched_trace_returns_the_cleaned_geometry(self, short_trace, caplog):
         handler, _ = fake_osrm(unmatched_requests=tuple(range(10)))
@@ -489,7 +503,10 @@ class TestRealisticResponseShape:
             "matchings": [
                 {
                     "confidence": 0.83,
-                    "geometry": {"type": "LineString", "coordinates": [list(c) for c in coordinates]},
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [list(c) for c in coordinates],
+                    },
                     "legs": [],
                     "distance": 400.0,
                     "duration": 40.0,
@@ -512,7 +529,9 @@ class TestRealisticResponseShape:
         }
 
         def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, content=json.dumps(body), headers={"content-type": "application/json"})
+            return httpx.Response(
+                200, content=json.dumps(body), headers={"content-type": "application/json"}
+            )
 
         result = run_match(short_trace, handler)
 

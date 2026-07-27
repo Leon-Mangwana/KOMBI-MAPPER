@@ -370,8 +370,11 @@ class _Chunk:
     """One request: `context` points are sent, `owned` points are kept.
 
     The context outside the owned range exists only so the matcher has road
-    either side of the seam. Owned ranges across all chunks partition the trace
-    exactly once, which is what keeps the stitched output from doubling back.
+    either side of the seam. Owned ranges cover the trace without overlapping,
+    which is what keeps the stitched output from doubling back — except that
+    consecutive chunks *share* their boundary point. Sharing it is what makes
+    the seam join: both chunks cut their geometry at the same input point, so
+    the two pieces meet there instead of leaving a one-point hole to bridge.
     """
 
     context_start: int
@@ -391,12 +394,15 @@ class _Piece:
 
 
 def _plan_chunks(count: int, *, max_coordinates: int, overlap: int) -> list[_Chunk]:
-    """Split `count` points into overlapping requests with disjoint owned ranges.
+    """Split `count` points into overlapping requests with owned ranges.
 
     The seam between two chunks is put in the *middle* of their overlap, since
     that is the point best served by both: the left chunk saw road ahead of it
     and the right chunk saw road behind it. Owning up to the edge of the overlap
     instead would keep exactly the half that was matched blind.
+
+    The seam point itself is owned by both sides, so their matched pieces are cut
+    at the same input point and meet there.
 
     The last chunk is pulled back to full size rather than being left as a short
     tail, because a 4-point request matches poorly and the tail of a trace is
@@ -416,21 +422,19 @@ def _plan_chunks(count: int, *, max_coordinates: int, overlap: int) -> list[_Chu
         end = start + max_coordinates - 1
         if position + 1 < len(starts):
             next_start = starts[position + 1]
-            # Middle of the overlap [next_start, end], and never behind the
-            # points this chunk already owns.
+            # Middle of the overlap [next_start, end], and always at least one
+            # point ahead of where this chunk starts owning.
             seam = next_start + (end - next_start + 1) // 2
-            owned_end = max(seam - 1, owned_start)
+            owned_end = max(seam, owned_start + 1)
         else:
             owned_end = count - 1
         chunks.append(_Chunk(start, end, owned_start, owned_end))
-        owned_start = owned_end + 1
+        owned_start = owned_end
 
     return chunks
 
 
-def _radiuses(
-    gdf: gpd.GeoDataFrame, *, default_radius_m: float, max_radius_m: float
-) -> np.ndarray:
+def _radiuses(gdf: gpd.GeoDataFrame, *, default_radius_m: float, max_radius_m: float) -> np.ndarray:
     """Per-point search radius, from the device's own accuracy where reported."""
     if "accuracy_m" in gdf.columns:
         radiuses = pd.Series(gdf["accuracy_m"]).to_numpy(dtype=float)
@@ -479,9 +483,7 @@ def _request_match(
     Six decimal places on the coordinates is ~0.11 m, comfortably finer than any
     GPS fix and short enough to keep the URL small.
     """
-    coordinates = ";".join(
-        f"{lon:.6f},{lat:.6f}" for lon, lat in zip(lons, lats, strict=True)
-    )
+    coordinates = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in zip(lons, lats, strict=True))
     params = {
         "geometries": "geojson",
         "overview": "full",
@@ -518,9 +520,7 @@ def _request_match(
     if code in FALLBACK_CODES:
         return None, str(code)
 
-    raise OSRMError(
-        f"OSRM answered HTTP {response.status_code} {code}: {payload.get('message')}"
-    )
+    raise OSRMError(f"OSRM answered HTTP {response.status_code} {code}: {payload.get('message')}")
 
 
 def _pieces_from_payload(payload: dict, chunk: _Chunk) -> list[_Piece]:
@@ -562,7 +562,9 @@ def _pieces_from_payload(payload: dict, chunk: _Chunk) -> list[_Piece]:
         try:
             matching = matchings[matching_index]
         except (IndexError, TypeError):
-            logger.warning("OSRM tracepoint referenced matching %d, which is absent.", matching_index)
+            logger.warning(
+                "OSRM tracepoint referenced matching %d, which is absent.", matching_index
+            )
             continue
 
         coordinates = (matching.get("geometry") or {}).get("coordinates") or []
@@ -599,13 +601,16 @@ def _pieces_from_payload(payload: dict, chunk: _Chunk) -> list[_Piece]:
 def _assemble(
     pieces: list[_Piece], *, metric_xy: np.ndarray, reasons: list[str | None]
 ) -> list[MatchedSegment]:
-    """Order the matched pieces and bridge everything between them.
+    """Order the matched pieces and bridge every gap between them.
 
     Every input point ends up covered: by a matched piece, or by a fallback that
-    runs the cleaned geometry from the end of one piece to the start of the
-    next. Bridging even a zero-point gap matters — two matchings that are
-    adjacent by index still leave a hole in the *line* where OSRM broke, and the
-    output has to be one connected LineString.
+    runs the cleaned geometry from the end of one piece to the start of the next.
+
+    Pieces meeting exactly at a shared index are joined directly — that is a
+    chunk seam, and both sides cut at the same point. A gap of even zero points
+    is bridged, though: two matchings that are adjacent by index still leave a
+    hole in the *line* where OSRM broke off, and the output has to be one
+    connected LineString.
     """
     count = len(metric_xy)
     ordered = sorted(pieces, key=lambda piece: (piece.start_index, piece.end_index))
@@ -615,9 +620,10 @@ def _assemble(
     previous_point: tuple[float, float] | None = None
 
     for piece in ordered:
-        if previous_index is not None and piece.start_index <= previous_index:
-            # Owned ranges are disjoint, so this means OSRM interleaved two
-            # matchings over the same points. Keeping both would double back.
+        if previous_index is not None and piece.start_index < previous_index:
+            # Owned ranges only ever share their boundary point, so a real
+            # overlap means OSRM interleaved two matchings over the same points.
+            # Keeping both would double back.
             logger.warning(
                 "Discarding a matched stretch over points %d-%d; it overlaps the previous one.",
                 piece.start_index,
@@ -625,18 +631,20 @@ def _assemble(
             )
             continue
 
-        interior_start = 0 if previous_index is None else previous_index + 1
-        bridge = _fallback_segment(
-            interior_start,
-            piece.start_index - 1,
-            metric_xy=metric_xy,
-            before=previous_point,
-            after=piece.geometry.coords[0],
-            span=(interior_start if previous_index is None else previous_index, piece.start_index),
-            reasons=reasons,
-        )
-        if bridge is not None:
-            segments.append(bridge)
+        if previous_index is None or piece.start_index > previous_index:
+            interior_start = 0 if previous_index is None else previous_index + 1
+            span_start = 0 if previous_index is None else previous_index
+            bridge = _fallback_segment(
+                interior_start,
+                piece.start_index - 1,
+                metric_xy=metric_xy,
+                before=previous_point,
+                after=piece.geometry.coords[0],
+                span=(span_start, piece.start_index),
+                reasons=reasons,
+            )
+            if bridge is not None:
+                segments.append(bridge)
 
         segments.append(
             MatchedSegment(
@@ -653,13 +661,23 @@ def _assemble(
     if previous_index is None:
         logger.warning("OSRM matched none of this trace; using the cleaned geometry throughout.")
         tail = _fallback_segment(
-            0, count - 1, metric_xy=metric_xy, before=None, after=None,
-            span=(0, count - 1), reasons=reasons,
+            0,
+            count - 1,
+            metric_xy=metric_xy,
+            before=None,
+            after=None,
+            span=(0, count - 1),
+            reasons=reasons,
         )
     elif previous_index < count - 1:
         tail = _fallback_segment(
-            previous_index + 1, count - 1, metric_xy=metric_xy, before=previous_point, after=None,
-            span=(previous_index, count - 1), reasons=reasons,
+            previous_index + 1,
+            count - 1,
+            metric_xy=metric_xy,
+            before=previous_point,
+            after=None,
+            span=(previous_index, count - 1),
+            reasons=reasons,
         )
     else:
         tail = None
