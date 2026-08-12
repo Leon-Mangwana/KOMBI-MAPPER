@@ -7,11 +7,12 @@ them to stand for it, and works out where along it the kombi actually stops.
 
 Two clusterings run, over different things:
 
-**Routes.** Each matched trace is simplified with Douglas–Peucker and compared to
-every other with the discrete Fréchet distance (`frechet.py`), giving a full
-pairwise distance matrix. DBSCAN over that matrix with `metric="precomputed"`
-groups the traces; each cluster is a route, and the route's `canonical_geom` is
-its **medoid** — the member trace with the smallest total distance to the others.
+**Routes.** Each matched trace is simplified with Douglas–Peucker (and then
+resampled — see `RESAMPLE_STEP_M`, which is not optional) and compared to every
+other with the discrete Fréchet distance (`frechet.py`), giving a full pairwise
+distance matrix. DBSCAN over that matrix with `metric="precomputed"` groups the
+traces; each cluster is a route, and the route's `canonical_geom` is its
+**medoid** — the member trace with the smallest total distance to the others.
 
 DBSCAN, and not k-means: the number of kombi routes in Harare is exactly what we
 are trying to find out, most of what gets uploaded is a one-off that belongs to

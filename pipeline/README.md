@@ -1,10 +1,9 @@
 # Kombi Pipeline
 
 Turns raw uploaded GPS traces into canonical routes and stops. This is stage 3
-of the pipeline in [`../CLAUDE.md`](../CLAUDE.md); clustering and GTFS export are
-still to come.
+of the pipeline in [`../CLAUDE.md`](../CLAUDE.md); GTFS export is still to come.
 
-Stack: NumPy · GeoPandas · Shapely · SQLAlchemy · httpx (OSRM).
+Stack: NumPy · GeoPandas · Shapely · scikit-learn · SQLAlchemy · httpx (OSRM).
 
 ## Setup
 
@@ -26,6 +25,8 @@ backend at `OSRM_URL` (default `http://localhost:5000`) — see
 | `clean.py`     | Load a trace, reject bad fixes, Kalman-smooth          |
 | `stops.py`     | Detect dwell events — where a kombi stood still        |
 | `match.py`     | Map-match a cleaned trace onto roads via OSRM          |
+| `frechet.py`   | Discrete Fréchet distance between two polylines        |
+| `cluster.py`   | Cluster traces into routes and dwells into stops       |
 | `synthetic.py` | Generate traces with known ground truth, for tests     |
 | `plot_trace.py`| Render raw vs cleaned for visual inspection            |
 
@@ -44,7 +45,13 @@ print(f"{matched.matched_fraction:.0%} matched over {matched.length_m:.0f} m")
 store_matched_geom(42, matched)
 ```
 
-`match.match_stored_trace(42)` does all three steps in one call.
+`match.match_stored_trace(42)` does all three steps in one call. Once every
+trace is matched, clustering runs over the whole batch at once:
+
+```bash
+python cluster.py --dry-run   # cluster and report, write nothing
+python cluster.py --replace   # rebuild routes, stops and route_stops
+```
 
 ### Cleaning
 
@@ -128,6 +135,63 @@ increasing — the single biggest quality lever on a noisy urban trace.
 Requests are `GET`, not `POST`: `osrm-routed` serves GET only, with coordinates
 in the URL path. Chunking keeps those URLs to roughly 4 KB.
 
+### Clustering
+
+`cluster.py` is the stage that turns a pile of individual rides into a network.
+Two clusterings run over different things and are then joined.
+
+**Routes.** Matched traces are compared pairwise with the discrete Fréchet
+distance and grouped with `DBSCAN(metric="precomputed", eps=200)`, in metres.
+Each cluster is a route; its `canonical_geom` is the cluster **medoid**, the
+member with the smallest total distance to the others.
+
+Fréchet rather than Hausdorff because it respects *order*: two traces down the
+same roads in opposite directions have a Hausdorff distance of nearly zero and
+are not the same route. DBSCAN rather than k-means because the number of kombi
+routes in Harare is the thing being measured, most uploads are one-offs that
+belong in no cluster, and a "route" has no mean — the average of two traces down
+parallel streets runs through the buildings between them. A medoid keeps the
+canonical geometry a real trace that a real kombi really drove.
+
+`eps` is a *maximum* over the coupling, not an average, and on two traces of one
+route the maximum is almost always at the ends — contributors board where they
+live, not at the terminus. 200 m is about two Harare blocks; the middle of the
+route costs nothing, the ends set the number.
+
+**Preparation matters more than it looks.** Traces are simplified with
+Douglas–Peucker at 15 m *and then resampled to a uniform 50 m spacing*. The
+second step is not an optimisation. The discrete Fréchet distance can only pair
+a vertex with a vertex, and Douglas–Peucker keeps vertices only at bends — so a
+3 km straight leg comes back with vertices at its ends and nothing between. When
+a bend clears the tolerance on one trace but not the other, the leftover vertex
+has no partner within kilometres and the pairing distance becomes the distance
+to the far end of the leg. Two traces never more than 10 m apart then measure
+365 m apart, which is what the first run of these tests actually did. No choice
+of `eps` fixes it, because the error scales with the longest straight leg.
+Resampling bounds the artefact at half a step.
+
+**Stops.** Every dwell `stops.detect_dwells` found on any clustered trace goes
+into one pile and is clustered with `DBSCAN(metric="euclidean", eps=40)` on the
+projected coordinates — dwells are points, and points do have a mean, so a stop
+sits at the mean of its dwells. A cluster survives only with **three distinct
+traces** behind it. Distinct traces, not dwell events: three dwells on one ride
+is one kombi in one stop-start traffic queue, which is one observation rather
+than three.
+
+**Joining the two.** A stop belongs to a route when one of the route's traces
+dwelled there, and a route's stops are ordered by `shapely.line_locate_point` —
+the distance along `canonical_geom` of the nearest point on it. That is the
+ordering as the kombi drives it, and it is the only one that survives a route
+doubling back: on an out-and-back route a stop 200 m from the start on the
+return leg is the *last* stop, which ordering by distance from the origin, or by
+chaining nearest neighbours, gets backwards.
+
+Routes, stops and `route_stops` are written in one transaction, and each
+clustered trace gets its `route_id` set. They are derived tables, so a rerun
+normally wants `--replace` — but that is not the default, because it deletes the
+`routes.short_name` and `stops.name` values that are exactly what this stage
+cannot fill in and what somebody will have edited by hand.
+
 ## Tests
 
 No database and no OSRM needed — the tests build synthetic traces with injected
@@ -146,6 +210,15 @@ show up as ~100 m of length error per chunk.
 Measured over 40 seeds on a 400 s trace with 4 m per-axis noise and two injected
 dwells: position RMSE 2.2 m against 5.7 m raw, both dwells found every time,
 durations within 5 s of injected, centroids within 2 m.
+
+The Fréchet implementation is checked two ways: against coupling matrices worked
+out by hand, written into the test alongside the arithmetic that produced them,
+and against a brute-force enumeration of every monotone coupling — the
+definition itself, at exponential cost, so only on inputs of a few points.
+Clustering is tested on traces built along known corridors, so the routes and
+stops it *should* find are known by construction. Persistence is the one part
+with no automated coverage: it needs PostGIS, and the rest of the suite
+deliberately needs no database.
 
 ## Visual inspection
 
@@ -166,5 +239,10 @@ python plot_trace.py --trace-id 42 --out t42.png # a real trace from the databas
   OSRM speaks lon/lat — it reprojects every response back to metres before
   measuring or cutting anything.
 - The pipeline reads and writes the API's tables directly rather than importing
-  the `api` package — they are separate installables, and only `trace_points`
-  and `traces.matched_geom` are needed.
+  the `api` package — they are separate installables, and only `trace_points`,
+  `traces`, `routes`, `stops` and `route_stops` are needed.
+- `frechet.py` implements the discrete Fréchet distance from scratch on NumPy
+  arrays; there is no library dependency for it. The Eiter–Mannila recursion is
+  filled bottom-up rather than memoised recursively, which computes the same
+  table without a recursion depth of `n + m`, and keeps two rows rather than
+  the whole `n × m` matrix.
