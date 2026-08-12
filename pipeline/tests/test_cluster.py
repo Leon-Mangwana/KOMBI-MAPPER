@@ -11,8 +11,10 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString, Point
 
+from clean import UTM36S
 from cluster import (
     MAX_STOP_OFFSET_M,
+    RESAMPLE_STEP_M,
     ROUTE_EPS_M,
     SIMPLIFY_TOLERANCE_M,
     STOP_EPS_M,
@@ -25,9 +27,9 @@ from cluster import (
     cluster_stops,
     order_route_stops,
     pairwise_frechet,
+    resample_traces,
     simplify_traces,
 )
-from clean import UTM36S
 from frechet import discrete_frechet
 from synthetic import DEFAULT_ORIGIN, DEFAULT_START
 
@@ -160,6 +162,71 @@ class TestSimplifyTraces:
         assert simplify_traces([]) == []
 
 
+class TestResampleTraces:
+    def test_no_gap_exceeds_the_step(self):
+        (resampled,) = resample_traces([trace_line(CORRIDOR_A)], 50.0)
+
+        gaps = np.hypot(*np.diff(np.array(resampled.coords), axis=0).T)
+        assert gaps.max() <= 50.0 + 1e-6
+
+    def test_the_shape_is_unchanged(self):
+        # Every new vertex lies on the line it came from, and the length is the
+        # same: resampling redistributes vertices, it does not move the route.
+        line = trace_line(CORRIDOR_A, spacing_m=25.0)
+
+        (resampled,) = resample_traces([line])
+
+        assert resampled.length == pytest.approx(line.length)
+        assert max(line.distance(Point(xy)) for xy in resampled.coords) < 1e-6
+
+    def test_endpoints_are_landed_on_exactly(self):
+        line = trace_line(CORRIDOR_A, trim_start_m=137.0, trim_end_m=61.0)
+
+        (resampled,) = resample_traces([line])
+
+        assert Point(resampled.coords[0]).distance(Point(line.coords[0])) < 1e-6
+        assert Point(resampled.coords[-1]).distance(Point(line.coords[-1])) < 1e-6
+
+    def test_a_sparse_line_gains_vertices(self):
+        (sparse,) = simplify_traces([trace_line(((0.0, 0.0), (2000.0, 0.0)))])
+        assert len(sparse.coords) == 2
+
+        (resampled,) = resample_traces([sparse], 50.0)
+
+        assert len(resampled.coords) == 41
+
+    def test_a_degenerate_line_is_left_alone(self):
+        point = at(0.0, 0.0)
+        stationary = LineString([point, point])
+
+        (resampled,) = resample_traces([stationary])
+
+        assert resampled.equals(stationary)
+
+    def test_rejects_a_non_positive_step(self):
+        with pytest.raises(ValueError, match="step_m must be positive"):
+            resample_traces([trace_line(CORRIDOR_A)], 0.0)
+
+    def test_handles_an_empty_batch(self):
+        assert resample_traces([]) == []
+
+    def test_it_is_what_makes_the_frechet_distance_usable(self):
+        """The regression this step exists for. See `cluster.RESAMPLE_STEP_M`.
+
+        These two traces of one corridor never diverge by more than about 10 m.
+        Douglas–Peucker alone leaves each with a vertex the other has no partner
+        for anywhere near — the legs are kilometres long and have no interior
+        vertices — and the discrete Fréchet distance reads several hundred
+        metres, far outside `ROUTE_EPS_M`. Resampling bounds that artefact at
+        half a step.
+        """
+        lines = [trace_line(CORRIDOR_B, jitter_m=3.0, seed=40 + index) for index in range(2)]
+        simplified = simplify_traces(lines)
+
+        assert pairwise_frechet(simplified)[0, 1] > ROUTE_EPS_M
+        assert pairwise_frechet(resample_traces(simplified))[0, 1] < RESAMPLE_STEP_M
+
+
 class TestPairwiseFrechet:
     def test_is_symmetric_with_a_zero_diagonal(self):
         lines = [
@@ -179,9 +246,7 @@ class TestPairwiseFrechet:
 
         distances = pairwise_frechet(lines)
 
-        expected = discrete_frechet(
-            np.array(lines[0].coords), np.array(lines[1].coords)
-        )
+        expected = discrete_frechet(np.array(lines[0].coords), np.array(lines[1].coords))
         assert distances[0, 1] == pytest.approx(expected)
 
     def test_traces_of_one_corridor_are_far_closer_than_of_two(self):
@@ -316,7 +381,10 @@ class TestClusterRoutes:
     def test_routes_come_back_ordered_by_support(self):
         lines = {index: trace_line(CORRIDOR_A, jitter_m=3.0, seed=30 + index) for index in range(4)}
         lines.update(
-            {10 + index: trace_line(CORRIDOR_B, jitter_m=3.0, seed=40 + index) for index in range(2)}
+            {
+                10 + index: trace_line(CORRIDOR_B, jitter_m=3.0, seed=40 + index)
+                for index in range(2)
+            }
         )
 
         routes = cluster_routes(traces_frame(lines))
@@ -386,9 +454,7 @@ class TestClusterStops:
 
     def test_two_traces_dwelling_twice_each_are_still_two_traces(self):
         rows = [
-            (trace_id, 1000.0 + offset, 0.0, 25.0)
-            for trace_id in (1, 2)
-            for offset in (-5.0, 5.0)
+            (trace_id, 1000.0 + offset, 0.0, 25.0) for trace_id in (1, 2) for offset in (-5.0, 5.0)
         ]
 
         assert cluster_stops(dwell_frame(rows)) == []
@@ -604,9 +670,7 @@ class TestBuildNetwork:
         route = next(r for r in network.routes if r.trace_ids == (1, 2, 3))
         stops = network.stops_by_label
 
-        along = [
-            route.canonical_geom.project(stops[label].centroid) for label in route.stop_labels
-        ]
+        along = [route.canonical_geom.project(stops[label].centroid) for label in route.stop_labels]
         assert along == sorted(along)
 
     def test_drops_the_stop_no_route_passes(self, network):
@@ -621,9 +685,7 @@ class TestBuildNetwork:
         assert len(network.stops_by_label) == len(network.stops)
 
     def test_summarises_itself(self, network):
-        assert network.summary() == (
-            "2 route(s) over 6 trace(s); 3 stop(s), 3 route-stop link(s)"
-        )
+        assert network.summary() == ("2 route(s) over 6 trace(s); 3 stop(s), 3 route-stop link(s)")
 
     def test_empty_input_gives_an_empty_network(self):
         empty = build_network(traces_frame({}), dwell_frame([]))

@@ -204,18 +204,14 @@ class TestProperties:
 
         # Traces arrive as UTM 36S eastings and northings, i.e. six- and
         # seven-figure numbers; the answer must not depend on that offset.
-        assert discrete_frechet(p + shift, q + shift) == pytest.approx(
-            discrete_frechet(p, q)
-        )
+        assert discrete_frechet(p + shift, q + shift) == pytest.approx(discrete_frechet(p, q))
 
     def test_scales_with_the_coordinates(self):
         rng = np.random.default_rng(9)
         p = rng.uniform(0.0, 100.0, size=(8, 2))
         q = rng.uniform(0.0, 100.0, size=(8, 2))
 
-        assert discrete_frechet(p * 3.0, q * 3.0) == pytest.approx(
-            3.0 * discrete_frechet(p, q)
-        )
+        assert discrete_frechet(p * 3.0, q * 3.0) == pytest.approx(3.0 * discrete_frechet(p, q))
 
     def test_is_never_below_the_endpoint_separation(self):
         rng = np.random.default_rng(10)

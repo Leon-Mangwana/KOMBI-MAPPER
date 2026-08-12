@@ -25,9 +25,7 @@ import numpy as np
 __all__ = ["coupling_matrix", "discrete_frechet"]
 
 
-def discrete_frechet(
-    p: np.ndarray, q: np.ndarray, *, max_distance: float | None = None
-) -> float:
+def discrete_frechet(p: np.ndarray, q: np.ndarray, *, max_distance: float | None = None) -> float:
     """Discrete Fréchet distance between two sequences of points, in metres.
 
     The recursion is the standard one over the coupling matrix `ca`, where
@@ -88,9 +86,7 @@ def discrete_frechet(
         return endpoints
 
     # Row 0 is a running maximum: the person is stuck at p₀ while the dog walks.
-    previous: list[float] = np.maximum.accumulate(
-        np.hypot(qx - px[0], qy - py[0])
-    ).tolist()
+    previous: list[float] = np.maximum.accumulate(np.hypot(qx - px[0], qy - py[0])).tolist()
     if max_distance is not None and min(previous) > max_distance:
         return min(previous)
 

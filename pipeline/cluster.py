@@ -61,22 +61,45 @@ logger = logging.getLogger(__name__)
 
 #: Douglas–Peucker tolerance for the traces fed to the Fréchet comparison.
 #:
-#: Two jobs, and the second is the one that matters. The obvious one is cost:
-#: Fréchet is O(nm) per pair and quadratic in the number of traces, so dropping
-#: a 40-minute trace from ~2400 vertices to a couple of hundred is the
-#: difference between a clustering run of minutes and one of hours.
-#:
-#: The second is that the *discrete* Fréchet distance can only pair vertex with
-#: vertex, so it is sensitive to how each line happens to be sampled — a vertex
-#: with no partner near it inflates the distance even when the two lines lie on
-#: top of each other (see `frechet.discrete_frechet`). Matched traces come back
-#: from OSRM sampled by road geometry rather than by time, so their vertex
-#: densities differ wildly. Simplifying both to the same tolerance puts vertices
-#: at the same places — the corners — and removes that artefact.
+#: Cost, mostly. Fréchet is O(nm) per pair and the number of pairs is quadratic
+#: in the number of traces, so dropping a 40-minute trace from ~2400 vertices to
+#: a couple of hundred is the difference between a clustering run of minutes and
+#: one of hours. It also removes the sub-lane wiggle that OSRM's road geometry
+#: carries, which is detail no comparison between two *routes* should be
+#: sensitive to.
 #:
 #: 15 m is comfortably below the width of the roads being distinguished, so no
 #: real difference in route is simplified away.
 SIMPLIFY_TOLERANCE_M = 15.0
+
+#: Vertex spacing the simplified lines are resampled to before comparison.
+#:
+#: Douglas–Peucker on its own is not enough, and the reason is worth spelling
+#: out because it is not obvious and it silently breaks the clustering.
+#:
+#: The *discrete* Fréchet distance can only ever pair a vertex with a vertex
+#: (see `frechet.discrete_frechet`). Douglas–Peucker keeps a vertex only where
+#: the line bends, so a 3 km straight leg comes back with vertices at its two
+#: ends and nothing in between. Two traces down that same leg are simplified
+#: independently, and a bend that clears the tolerance on one may not on the
+#: other — so one line ends up with a vertex mid-leg that has no partner within
+#: kilometres on the other. The pairing distance is then the distance to the far
+#: end of the leg, and two traces lying within 10 m of each other for their whole
+#: length measure hundreds of metres apart. This is not hypothetical: it is what
+#: the first run of `tests/test_cluster.py` did, at 365 m on a corridor whose
+#: traces never diverge by more than about 10 m.
+#:
+#: No choice of `eps` fixes that, because the error scales with the length of
+#: the longest straight leg rather than with anything about the routes. Putting
+#: vertices back at a fixed arc-length spacing does fix it: every vertex on one
+#: line then has a partner within half a step on the other, which bounds the
+#: sampling artefact at `step / 2` instead of leaving it unbounded.
+#:
+#: Simplify *then* resample, in that order: Douglas–Peucker decides the shape and
+#: throws away the noise, and resampling only redistributes vertices along the
+#: shape it settled on. 50 m caps the artefact at 25 m — well inside `ROUTE_EPS_M`
+#: — and still leaves a 12 km route at about 240 vertices.
+RESAMPLE_STEP_M = 50.0
 
 #: DBSCAN radius for route clustering: the Fréchet distance under which two
 #: matched traces are taken to be the same route.
@@ -324,8 +347,45 @@ def simplify_traces(
     trace still has at least two points and still starts and ends where it did —
     which matters, because those endpoints are what the Fréchet distance is most
     sensitive to.
+
+    This is half of the preparation a trace needs; `resample_traces` is the
+    other half, and running this one alone is a trap. See `RESAMPLE_STEP_M`.
     """
     return [geometry.simplify(tolerance_m, preserve_topology=False) for geometry in geometries]
+
+
+def resample_traces(
+    geometries: list[LineString], step_m: float = RESAMPLE_STEP_M
+) -> list[LineString]:
+    """Put vertices back at a uniform spacing along each line.
+
+    The step is the *largest* gap that comes out: each line is cut into the
+    fewest equal pieces no longer than `step_m`, so the spacing is a little
+    under it and the endpoints are landed on exactly rather than being
+    overshot. The shape is untouched — every new vertex lies on the line it came
+    from — and only the sampling changes.
+
+    Why this exists at all, and why it runs after Douglas–Peucker rather than
+    instead of it, is `RESAMPLE_STEP_M`.
+    """
+    if step_m <= 0:
+        raise ValueError(f"step_m must be positive; got {step_m}.")
+
+    resampled: list[LineString] = []
+    for geometry in geometries:
+        length = geometry.length
+        if length == 0.0:
+            # A trace that never went anywhere. Nothing to redistribute, and
+            # `linspace` over a zero range would only make duplicate vertices.
+            resampled.append(geometry)
+            continue
+
+        steps = int(np.ceil(length / step_m))
+        distances = np.linspace(0.0, length, steps + 1)
+        points = shapely.line_interpolate_point(geometry, distances)
+        resampled.append(LineString(shapely.get_coordinates(points)))
+
+    return resampled
 
 
 def pairwise_frechet(
@@ -334,8 +394,9 @@ def pairwise_frechet(
     """Symmetric matrix of discrete Fréchet distances in metres, zero diagonal.
 
     Args:
-        geometries: Lines in EPSG:32736. Simplify them first — see
-            `SIMPLIFY_TOLERANCE_M`.
+        geometries: Lines in EPSG:32736. Put them through `simplify_traces` and
+            then `resample_traces` first — a raw pair of matched traces will
+            give a badly inflated distance. See `RESAMPLE_STEP_M`.
         max_distance: Passed to `frechet.discrete_frechet` as an early exit.
             Entries above it become lower bounds rather than exact distances,
             which is all a DBSCAN at `eps <= max_distance` needs but is wrong
@@ -351,9 +412,7 @@ def pairwise_frechet(
     distances = np.zeros((count, count), dtype=float)
     for i in range(count):
         for j in range(i + 1, count):
-            distance = discrete_frechet(
-                coordinates[i], coordinates[j], max_distance=max_distance
-            )
+            distance = discrete_frechet(coordinates[i], coordinates[j], max_distance=max_distance)
             distances[i, j] = distances[j, i] = distance
 
     return distances
@@ -363,6 +422,7 @@ def cluster_routes(
     traces: gpd.GeoDataFrame,
     *,
     tolerance_m: float = SIMPLIFY_TOLERANCE_M,
+    step_m: float = RESAMPLE_STEP_M,
     eps_m: float = ROUTE_EPS_M,
     min_traces: int = ROUTE_MIN_TRACES,
     prune: bool = True,
@@ -373,6 +433,7 @@ def cluster_routes(
         traces: Output of `load_matched_traces` — `trace_id` plus a LineString
             `geometry` in EPSG:32736.
         tolerance_m: Douglas–Peucker tolerance. See `SIMPLIFY_TOLERANCE_M`.
+        step_m: Vertex spacing to resample to afterwards. See `RESAMPLE_STEP_M`.
         eps_m: DBSCAN radius in metres. See `ROUTE_EPS_M`.
         min_traces: DBSCAN `min_samples`, counting the trace itself, so 2 means
             "at least one other trace agrees". See `ROUTE_MIN_TRACES`.
@@ -392,20 +453,19 @@ def cluster_routes(
 
     trace_ids = traces["trace_id"].to_numpy(dtype=int)
     geometries = list(traces.geometry)
-    simplified = simplify_traces(geometries, tolerance_m)
+    prepared = resample_traces(simplify_traces(geometries, tolerance_m), step_m)
 
     logger.info(
-        "Comparing %d trace(s): %d vertices simplified to %d at %.0f m tolerance.",
-        len(simplified),
+        "Comparing %d trace(s): %d vertices simplified at %.0f m and resampled to %d at %.0f m.",
+        len(prepared),
         sum(shapely.get_num_coordinates(g) for g in geometries),
-        sum(shapely.get_num_coordinates(g) for g in simplified),
         tolerance_m,
+        sum(shapely.get_num_coordinates(g) for g in prepared),
+        step_m,
     )
-    distances = pairwise_frechet(simplified, max_distance=eps_m if prune else None)
+    distances = pairwise_frechet(prepared, max_distance=eps_m if prune else None)
 
-    labels = DBSCAN(eps=eps_m, min_samples=min_traces, metric="precomputed").fit_predict(
-        distances
-    )
+    labels = DBSCAN(eps=eps_m, min_samples=min_traces, metric="precomputed").fit_predict(distances)
 
     clusters: list[RouteCluster] = []
     for label in sorted({int(value) for value in labels} - {-1}):
@@ -419,7 +479,7 @@ def cluster_routes(
         # small, and the pairs inside one are mostly close enough that the
         # pruning never fired on them anyway.
         if prune and len(members) > 2:
-            local = pairwise_frechet([simplified[index] for index in members])
+            local = pairwise_frechet([prepared[index] for index in members])
         else:
             local = distances[np.ix_(members, members)]
 
@@ -586,6 +646,7 @@ def build_network(
     dwells: gpd.GeoDataFrame,
     *,
     tolerance_m: float = SIMPLIFY_TOLERANCE_M,
+    step_m: float = RESAMPLE_STEP_M,
     route_eps_m: float = ROUTE_EPS_M,
     min_traces: int = ROUTE_MIN_TRACES,
     stop_eps_m: float = STOP_EPS_M,
@@ -598,15 +659,17 @@ def build_network(
     reads and writes; this is what the tests drive.
     """
     routes = cluster_routes(
-        traces, tolerance_m=tolerance_m, eps_m=route_eps_m, min_traces=min_traces
+        traces,
+        tolerance_m=tolerance_m,
+        step_m=step_m,
+        eps_m=route_eps_m,
+        min_traces=min_traces,
     )
     stops = cluster_stops(dwells, eps_m=stop_eps_m, min_support=min_support)
     return _join(routes, stops, max_offset_m=max_offset_m)
 
 
-def _join(
-    routes: list[RouteCluster], stops: list[StopCluster], *, max_offset_m: float
-) -> Network:
+def _join(routes: list[RouteCluster], stops: list[StopCluster], *, max_offset_m: float) -> Network:
     """Order each route's stops along it and drop the stops nothing serves."""
     routes = order_route_stops(routes, stops, max_offset_m=max_offset_m)
 
@@ -628,6 +691,7 @@ def run(
     replace_existing: bool = False,
     persist: bool = True,
     tolerance_m: float = SIMPLIFY_TOLERANCE_M,
+    step_m: float = RESAMPLE_STEP_M,
     route_eps_m: float = ROUTE_EPS_M,
     min_traces: int = ROUTE_MIN_TRACES,
     stop_eps_m: float = STOP_EPS_M,
@@ -646,7 +710,7 @@ def run(
         engine: Database engine. Defaults to the process-wide one.
         replace_existing: Clear the derived tables first. See `persist_network`.
         persist: Set `False` for a dry run — cluster and report, write nothing.
-        tolerance_m, route_eps_m, min_traces, stop_eps_m, min_support,
+        tolerance_m, step_m, route_eps_m, min_traces, stop_eps_m, min_support,
         max_offset_m: As `build_network`.
 
     Returns:
@@ -656,7 +720,11 @@ def run(
 
     traces = load_matched_traces(engine)
     routes = cluster_routes(
-        traces, tolerance_m=tolerance_m, eps_m=route_eps_m, min_traces=min_traces
+        traces,
+        tolerance_m=tolerance_m,
+        step_m=step_m,
+        eps_m=route_eps_m,
+        min_traces=min_traces,
     )
 
     clustered_ids = sorted({trace_id for route in routes for trace_id in route.trace_ids})
@@ -783,9 +851,7 @@ def persist_network(
                 {"route_id": route_id, "trace_ids": list(route.trace_ids)},
             )
 
-    logger.info(
-        "Persisted %d route(s) and %d stop(s).", len(network.routes), len(network.stops)
-    )
+    logger.info("Persisted %d route(s) and %d stop(s).", len(network.routes), len(network.stops))
     return Persisted(route_ids=route_ids, stop_ids=stop_ids)
 
 
