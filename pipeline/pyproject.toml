@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.1",
     "pyproj>=3.6",
+    "scikit-learn>=1.4",
     "sqlalchemy>=2.0",
     "psycopg[binary]>=3.1",
     "pydantic-settings>=2.2",
@@ -27,7 +28,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["clean", "stops", "match", "config", "synthetic"]
+py-modules = ["clean", "stops", "match", "cluster", "frechet", "config", "synthetic"]
 
 [tool.ruff]
 target-version = "py311"
