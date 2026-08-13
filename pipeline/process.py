@@ -331,9 +331,7 @@ def _fail(
     logger.warning("Trace %d failed: %s", trace_id, reason)
     if not dry_run:
         set_status(trace_id, STATUS_FAILED, engine=engine)
-    return TraceOutcome(
-        trace_id=trace_id, status=STATUS_FAILED, points=points, reason=reason
-    )
+    return TraceOutcome(trace_id=trace_id, status=STATUS_FAILED, points=points, reason=reason)
 
 
 # --------------------------------------------------------------------------
