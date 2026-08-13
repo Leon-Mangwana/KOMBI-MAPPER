@@ -1,10 +1,22 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+#: Where `pipeline/gtfs.py` writes by default, resolved from this file rather
+#: than the working directory so that `uvicorn app.main:app` finds it from
+#: anywhere in the monorepo. Deployments where the two run in separate
+#: containers must set GTFS_PATH to whatever volume they share.
+_DEFAULT_GTFS_PATH = Path(__file__).resolve().parents[2] / "pipeline" / "gtfs_out" / "gtfs.zip"
 
 
 class Settings(BaseSettings):
     """Application configuration, populated from the environment / .env file."""
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/kombi"
+
+    # The GTFS feed the pipeline exported, served at GET /gtfs.zip. The API
+    # never builds it — see app/routers/gtfs.py.
+    gtfs_path: Path = _DEFAULT_GTFS_PATH
 
     # Browser origins allowed to call the API. The capture PWA uploads traces
     # with fetch(), so its origin must be listed here or the browser will block

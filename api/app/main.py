@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .routers import traces
+from .routers import gtfs, traces
 
 app = FastAPI(title="Kombi Route Mapper API", version="0.1.0")
 
@@ -18,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(traces.router)
+app.include_router(gtfs.router)
 
 
 @app.get("/health", tags=["meta"])

@@ -14,6 +14,9 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "pydantic-settings>=2.2",
     "httpx>=0.27",
+    # zoneinfo needs a tz database, which Windows and slim Linux images do not
+    # ship. gtfs.py reads departure times in the agency timezone.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +31,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["clean", "stops", "match", "cluster", "frechet", "config", "synthetic"]
+py-modules = ["clean", "stops", "match", "cluster", "frechet", "gtfs", "config", "synthetic"]
 
 [tool.ruff]
 target-version = "py311"
