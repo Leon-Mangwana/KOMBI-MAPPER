@@ -31,6 +31,7 @@ backend at `OSRM_URL` (default `http://localhost:5000`) — see
 | `cluster.py`   | Cluster traces into routes and dwells into stops       |
 | `gtfs.py`      | Export the clustered network as a zipped GTFS feed     |
 | `synthetic.py` | Generate traces with known ground truth, for tests     |
+| `seed_demo.py` | Upload synthetic traces, to exercise the system end to end |
 | `plot_trace.py`| Render raw vs cleaned for visual inspection            |
 
 ```python
@@ -443,6 +444,28 @@ Persistence is the part with no automated coverage: `cluster.persist_network`,
 `gtfs.load_export_network` and `process.py`'s handful of statements are the
 functions that need PostGIS, and the rest of the suite deliberately needs no
 database.
+
+## Seeding a demo network
+
+To see the whole system work without riding a kombi first — or before preparing
+an OSRM dataset, which is a multi-gigabyte one-off:
+
+```bash
+python seed_demo.py --fake-match    # 12 traces along 3 corridors, via POST /traces
+python cluster.py --replace
+python gtfs.py
+```
+
+That yields 3 routes of 4 traces each, 3 stops apiece, and a valid feed. Traces
+go in **over HTTP**, so the API must be running and the real ingest path is
+exercised. The corridors and dwell windows are known by construction, so the
+output can be checked against what went in.
+
+`--fake-match` writes each trace's *cleaned* geometry into `matched_geom` and
+marks it `matched`. That is not map matching and the result is not a road — it
+is a smoothed GPS track. It exists so clustering, the export and the web map can
+be exercised before OSRM is up. Once it is, `python process.py --all` re-matches
+the same traces properly.
 
 ## Visual inspection
 
