@@ -31,7 +31,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["clean", "stops", "match", "cluster", "frechet", "gtfs", "config", "synthetic"]
+py-modules = [
+    "clean",
+    "stops",
+    "match",
+    "process",
+    "cluster",
+    "frechet",
+    "gtfs",
+    "config",
+    "synthetic",
+]
 
 [tool.ruff]
 target-version = "py311"
