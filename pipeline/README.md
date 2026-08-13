@@ -26,6 +26,7 @@ backend at `OSRM_URL` (default `http://localhost:5000`) — see
 | `clean.py`     | Load a trace, reject bad fixes, Kalman-smooth          |
 | `stops.py`     | Detect dwell events — where a kombi stood still        |
 | `match.py`     | Map-match a cleaned trace onto roads via OSRM          |
+| `process.py`   | The batch job: walk the `traces` table through the above |
 | `frechet.py`   | Discrete Fréchet distance between two polylines        |
 | `cluster.py`   | Cluster traces into routes and dwells into stops       |
 | `gtfs.py`      | Export the clustered network as a zipped GTFS feed     |
@@ -60,6 +61,67 @@ and the clustered network is exported as a GTFS feed:
 ```bash
 python gtfs.py                # writes gtfs_out/gtfs.zip
 ```
+
+In practice none of that is run by hand — `process.py` is the job that does it:
+
+```bash
+python process.py             # match every trace uploaded since the last run
+python process.py --full      # ...then re-cluster and re-export the feed
+```
+
+### Processing
+
+The modules above are libraries: each takes a frame and gives one back, and none
+of them decides *which* traces to work on. `process.py` is what walks the
+`traces` table and turns them into a stage that runs.
+
+```bash
+python process.py --dry-run           # clean and match, write nothing
+python process.py --limit 5           # a cautious first batch
+python process.py --trace 42          # one trace, whatever its status
+python process.py --retry             # include traces an earlier run rejected
+python process.py --all               # every trace in the table
+python process.py --full --replace    # match, then rebuild the whole network
+```
+
+**Statuses.** The API writes `uploaded`; this stage writes one of three terminal
+states, and `process.py` picks up whatever is still `uploaded`:
+
+| Status     | What it means                                                     |
+| ---------- | ----------------------------------------------------------------- |
+| `matched`  | Cleaned, matched, `matched_geom` stored. Clustering will see it.   |
+| `rejected` | Ran fine, but too little of the trace matched to trust it.         |
+| `failed`   | Could not be processed: no points, no timestamps, too few fixes.   |
+
+**The quality gate.** `match_trace` never fails a trace outright — a stretch
+OSRM cannot match falls back to cleaned GPS geometry and is flagged on the
+result. That is right for a library and wrong to feed to clustering unchecked: a
+trace that came back 30% matched is mostly GPS noise, and the Fréchet distances
+it produces would be meaningless. So a trace whose matched fraction is under
+`MIN_MATCHED_FRACTION` (0.6, `--min-matched-fraction`) is `rejected` and its
+geometry is *not* stored — `matched_geom` is the only signal clustering reads,
+so storing it and hoping would let the trace back in. A re-run that rejects a
+trace an earlier run had stored clears the old geometry for the same reason.
+
+The default is deliberately lenient. Harare's network runs partly on roads OSM
+has thinly mapped, and a trace genuinely on a road OSRM does not know about
+falls back through no fault of the recording. The gate is there to catch traces
+that are *mostly* fallback — a walk, a private car through a compound, a phone
+that spent the trip in a bag.
+
+**OSRM being down is not a bad trace.** An `OSRMError` means the matcher was
+unreachable or answered nonsense, which says nothing about the trace in hand.
+Marking traces `failed` on it would burn through the backlog in seconds and
+leave a table of perfectly good traces this stage would never look at again. So
+it aborts the run instead: everything already processed keeps its status,
+everything untouched stays `uploaded`, and a re-run after OSRM is back picks up
+where it stopped. `--full` will not cluster after an aborted run — a network
+built from an arbitrary prefix of the backlog is worse than yesterday's.
+
+**`--full`** runs clustering and the GTFS export after matching. Clustering is
+global, so it runs once at the end rather than per trace, and it is skipped
+entirely when the run matched nothing new — re-clustering identical inputs would
+spend minutes writing the same routes back.
 
 ### Cleaning
 
@@ -371,9 +433,16 @@ database stores them, and asserted against Africa/Harare bands — a 05:30 UTC
 departure belongs to the morning peak, and reading it as 05:30 local would file
 it two bands away.
 
-Persistence is the part with no automated coverage: `cluster.persist_network`
-and `gtfs.load_export_network` are the two functions that need PostGIS, and the
-rest of the suite deliberately needs no database.
+`process.py` is tested for its orchestration rather than its arithmetic — which
+traces get picked up, which status each outcome earns, what is written and what
+is deliberately not, and that an unreachable OSRM stops the run instead of
+condemning the backlog. The cleaning and matching it drives are stubbed there,
+since they have suites of their own.
+
+Persistence is the part with no automated coverage: `cluster.persist_network`,
+`gtfs.load_export_network` and `process.py`'s handful of statements are the
+functions that need PostGIS, and the rest of the suite deliberately needs no
+database.
 
 ## Visual inspection
 

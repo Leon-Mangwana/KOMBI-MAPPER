@@ -27,8 +27,7 @@ class Settings(BaseSettings):
     # Comma-separated rather than a list field: pydantic-settings expects JSON
     # for complex types, which is awkward to write in a .env file.
     cors_origins: str = (
-        "http://localhost:5173,http://localhost:4173,"
-        "http://localhost:5174,http://localhost:4174"
+        "http://localhost:5173,http://localhost:4173,http://localhost:5174,http://localhost:4174"
     )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

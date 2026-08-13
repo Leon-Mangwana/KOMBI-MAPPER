@@ -11,13 +11,15 @@ transit apps.
 
 1. **Capture** — ride a kombi, record a GPS trace in the PWA, upload it.
 2. **Ingest** — the API stores raw traces.
-3. **Process** — the pipeline cleans, map-matches (OSRM), detects stops, and
-   clusters traces into canonical routes and stops.
+3. **Process** — `pipeline/process.py` cleans and map-matches (OSRM) every
+   uploaded trace, then clusters the matched ones into canonical routes and
+   stops, detecting stops from where kombis stood still.
 4. **Export** — canonical routes and stops become a GTFS feed, served at
    `GET /gtfs.zip`. Kombis have no timetable, so the feed uses `frequencies.txt`
    with headways measured from observed departures rather than an invented
    schedule — see [pipeline/README.md](pipeline/README.md#gtfs-export).
-5. **Explore** — the web app renders routes on a public map.
+5. **Explore** — the web app renders the routes on a public map, reading
+   `GET /routes` and `GET /stops`.
 
 ## Repository layout
 
@@ -33,16 +35,70 @@ transit apps.
 
 Prerequisites: Docker, Python 3.11, Node.js.
 
+Each directory owns its own tooling and has a README with the detail; this is
+the shortest path from a clean checkout to a running system.
+
+**1. Infrastructure.**
+
 ```bash
-# 1. Bring up Postgres + PostGIS
 cd infra
 docker compose up -d postgis
 ```
 
 The OSRM service used for map matching needs a road network prepared from an OSM
-extract before it will start — see [infra/README.md](infra/README.md).
+extract before it will start — see [infra/README.md](infra/README.md). Nothing
+but map matching needs it, so the rest can come up first.
 
-<!-- TODO: document api, pipeline, capture, and web setup once scaffolded -->
+**2. API** — [api/README.md](api/README.md)
+
+```bash
+cd api
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+cp .env.example .env
+alembic upgrade head
+uvicorn app.main:app --reload                       # http://localhost:8000/docs
+```
+
+**3. Capture PWA** — [capture/README.md](capture/README.md)
+
+```bash
+cd capture
+npm install
+cp .env.example .env
+npm run dev                                         # http://localhost:5173
+```
+
+GPS needs a secure context, so testing on a phone means a tunnel or HTTPS — see
+the capture README.
+
+**4. Pipeline** — [pipeline/README.md](pipeline/README.md)
+
+Once some traces have been uploaded, and with OSRM running:
+
+```bash
+cd pipeline
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+python process.py --full          # match new traces, re-cluster, re-export GTFS
+```
+
+`process.py` is the whole backend in one command. Run the stages separately
+(`cluster.py`, `gtfs.py`) when tuning them.
+
+**5. Web map** — [web/README.md](web/README.md)
+
+```bash
+cd web
+npm install
+cp .env.example .env
+npm run dev                                         # http://localhost:5174
+```
+
+The two front ends are pinned to different ports so they can run at once, and
+both are in the API's default `CORS_ORIGINS`. Neither has a basemap until you
+point it at a self-hosted Protomaps style or `.pmtiles` archive; without one
+they render on a blank background, which is enough to see the data.
 
 ## Development
 
@@ -52,6 +108,20 @@ extract before it will start — see [infra/README.md](infra/README.md).
 
 See [CLAUDE.md](CLAUDE.md) for full conventions, including the geospatial
 CRS rules (store EPSG:4326, compute in EPSG:32736).
+
+Tests and checks, per directory:
+
+```bash
+cd api      && ruff check . && ruff format --check . && pytest   # needs PostGIS
+cd pipeline && ruff check . && ruff format --check . && pytest   # no services needed
+cd capture  && npm run typecheck && npm run build
+cd web      && npm run typecheck && npm run build
+```
+
+CI in [.github/workflows](.github/workflows) runs exactly these, one workflow
+per directory, triggered only by changes under it. The API workflow brings up a
+PostGIS service; the pipeline suite deliberately needs no database, and mocks
+OSRM.
 
 ## License
 
