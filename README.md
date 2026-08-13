@@ -13,7 +13,10 @@ transit apps.
 2. **Ingest** — the API stores raw traces.
 3. **Process** — the pipeline cleans, map-matches (OSRM), detects stops, and
    clusters traces into canonical routes and stops.
-4. **Export** — canonical routes and stops become a GTFS feed.
+4. **Export** — canonical routes and stops become a GTFS feed, served at
+   `GET /gtfs.zip`. Kombis have no timetable, so the feed uses `frequencies.txt`
+   with headways measured from observed departures rather than an invented
+   schedule — see [pipeline/README.md](pipeline/README.md#gtfs-export).
 5. **Explore** — the web app renders routes on a public map.
 
 ## Repository layout

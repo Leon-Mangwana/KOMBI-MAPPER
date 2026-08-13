@@ -1,7 +1,8 @@
 # Kombi Pipeline
 
-Turns raw uploaded GPS traces into canonical routes and stops. This is stage 3
-of the pipeline in [`../CLAUDE.md`](../CLAUDE.md); GTFS export is still to come.
+Turns raw uploaded GPS traces into canonical routes and stops, and exports them
+as a GTFS feed. This is stages 3 and 4 of the pipeline in
+[`../CLAUDE.md`](../CLAUDE.md).
 
 Stack: NumPy · GeoPandas · Shapely · scikit-learn · SQLAlchemy · httpx (OSRM).
 
@@ -27,6 +28,7 @@ backend at `OSRM_URL` (default `http://localhost:5000`) — see
 | `match.py`     | Map-match a cleaned trace onto roads via OSRM          |
 | `frechet.py`   | Discrete Fréchet distance between two polylines        |
 | `cluster.py`   | Cluster traces into routes and dwells into stops       |
+| `gtfs.py`      | Export the clustered network as a zipped GTFS feed     |
 | `synthetic.py` | Generate traces with known ground truth, for tests     |
 | `plot_trace.py`| Render raw vs cleaned for visual inspection            |
 
@@ -51,6 +53,12 @@ trace is matched, clustering runs over the whole batch at once:
 ```bash
 python cluster.py --dry-run   # cluster and report, write nothing
 python cluster.py --replace   # rebuild routes, stops and route_stops
+```
+
+and the clustered network is exported as a GTFS feed:
+
+```bash
+python gtfs.py                # writes gtfs_out/gtfs.zip
 ```
 
 ### Cleaning
@@ -192,6 +200,145 @@ normally wants `--replace` — but that is not the default, because it deletes t
 `routes.short_name` and `stops.name` values that are exactly what this stage
 cannot fill in and what somebody will have edited by hand.
 
+### GTFS export
+
+`gtfs.py` writes the eight files a consumer needs — `agency.txt`, `stops.txt`,
+`routes.txt`, `trips.txt`, `stop_times.txt`, `shapes.txt`, `calendar.txt` and
+`frequencies.txt` — zipped at the archive root.
+
+Most of it is a translation of rows the clustering already decided. One question
+is genuinely hard, and it is the shape of the whole file:
+
+**Kombis have no timetable.** A kombi leaves the rank when it is full. No
+departure time is published, none is adhered to, and no amount of trace
+collection will produce one, because there is nothing there to observe. GTFS has
+a facility for exactly this and it is `frequencies.txt`: a single *reference
+trip* in `stop_times.txt` giving the pattern — which stops, in what order, how
+far apart — and then, per time band, a headway for how often that pattern
+repeats. `exact_times=0` says "roughly every N minutes, no guaranteed clock
+times", which is what a kombi service is.
+
+The alternative is synthesising a `trips.txt` row per notional departure at
+06:00, 06:15, 06:30. That produces a feed of exactly the shape a trip planner
+renders as a timetable, promising a passenger a 06:15 departure that nobody has
+committed to and that no observation supports. Every number in it would be
+invented here. So: frequencies, and the headways come from departures that
+actually happened.
+
+**Headways.** Every clustered trace is one observed departure, timestamped at
+its first point. Departures are converted to the agency timezone, bucketed into
+five bands of the operating day, grouped by date, and differenced:
+
+| Band            | Local time  |
+| --------------- | ----------- |
+| `early_morning` | 04:00–06:00 |
+| `am_peak`       | 06:00–09:00 |
+| `midday`        | 09:00–15:00 |
+| `pm_peak`       | 15:00–19:00 |
+| `evening`       | 19:00–22:00 |
+
+The band's headway is the **median** of those gaps, rounded to the minute. Both
+groupings matter: the interval from the last kombi on Tuesday to the first on
+Wednesday is an overnight closure rather than a headway, and the interval from
+08:00 to 14:00 spans a peak and a lull and describes neither.
+
+**The bias is real, large, and one-sided.** Contributors ride some kombis and
+not others, so an observed gap spans every departure nobody recorded. The
+estimate is an *upper bound* on the true headway, tightening as coverage
+improves. It is still a measurement of a real quantity converging on the right
+answer, which is more than a fabricated timetable can claim — but it is why
+headways are clamped to 2–60 minutes, and why a band is only published when a
+departure was actually recorded in it. `python gtfs.py` prints the basis of
+every headway it wrote (`band`, `route` or `default`) so that how much of a feed
+is measured is visible at export time.
+
+A route with no observed departure at all still gets one all-day row at the
+default headway: a trip with no `frequencies.txt` entry is not a frequency-based
+trip, it silently becomes a single scheduled departure at midnight. Pass
+`--fill-bands` to publish every band for every route, filling the unobserved
+ones from the route's own median — a more usable feed, a less honest one.
+
+**Running times.** `stop_times.txt` still needs times, and they are what the
+spec says they are for a frequency-based trip: offsets from the trip's own
+start, not clock times. The reference trip is anchored at `00:00:00` and each
+stop's offset is its distance along the route over the route's observed
+operating speed — the median across its traces of matched length over wall-clock
+duration. That already includes time spent stopped, so no separate dwell
+allowance is added; adding one would count the same seconds twice. Every row
+carries `timepoint=0`, which marks the times approximate.
+
+**Everything else worth knowing.** `stops.name` and `routes.short_name` are the
+columns clustering cannot fill in, so an unnamed stop is exported as
+`Stop <id>`, and a route with no name at all is named after its terminals, or
+failing that `R<id>`. Shapes are Douglas–Peucker simplified at 5 m — stop
+distances are measured on the *simplified* line, so `shape_dist_traveled` agrees
+between `shapes.txt` and `stop_times.txt`. A route with fewer than two stops is
+excluded and logged: a one-stop trip is not a trip a passenger can take. The zip
+is byte-identical when the network has not changed, so `sha256sum` answers "is
+this new?".
+
+```bash
+python gtfs.py                       # writes gtfs_out/gtfs.zip
+python gtfs.py -o /srv/kombi/gtfs.zip
+python gtfs.py --fill-bands          # publish every band, observed or not
+```
+
+Agency details come from the environment — `GTFS_AGENCY_NAME`, `GTFS_AGENCY_URL`
+and `GTFS_AGENCY_TIMEZONE` (default `Africa/Harare`, which is also the timezone
+the time bands are read in). The defaults are valid GTFS placeholders; a real
+deployment must set at least the name and URL. The API serves whatever
+`gtfs.py` last wrote at `GET /gtfs.zip` — see
+[`../api/README.md`](../api/README.md).
+
+### Validating the feed
+
+The feed is checked with [MobilityData's
+gtfs-validator](https://github.com/MobilityData/gtfs-validator), which is the
+reference implementation of the spec's rules and what a consumer will judge the
+feed by. Download the latest release jar (it needs Java 17+) and run it over the
+export:
+
+```bash
+python gtfs.py -o gtfs_out/gtfs.zip
+
+java -jar gtfs-validator.jar \
+  --input gtfs_out/gtfs.zip \
+  --output_base gtfs_out/validation \
+  --country_code ZW
+```
+
+That writes `report.html` (open it in a browser), `report.json` for scripting,
+and `system_errors.json`. Notices come in three severities and only the first is
+a failure:
+
+- **ERROR** — the feed breaks the spec. Nothing here should ever produce one; if
+  one appears, it is a bug in `gtfs.py`, not a data problem to be excused.
+- **WARNING** — legal but likely wrong. Read every one.
+- **INFO** — advisory.
+
+To fail a build on it, `report.json` has a `notices` array with a `severity` on
+each entry:
+
+```bash
+python -c "import json,sys; \
+  n=json.load(open('gtfs_out/validation/report.json'))['notices']; \
+  e=[x for x in n if x['severity']=='ERROR']; \
+  print(f'{len(e)} error notice(s)'); sys.exit(1 if e else 0)"
+```
+
+There is also a [web validator](https://gtfs-validator.mobilitydata.org/) that
+takes an uploaded zip, which is quicker for a one-off look and needs no Java.
+
+Two things it will not tell you, because no validator can. First, whether the
+headways are *true* — they are valid GTFS whatever they say, and the honest
+check is the `basis` column `gtfs.py` prints. Second, whether the routes are
+real; that is what the trace coverage and `ROUTE_MIN_TRACES` are for.
+
+The `pytest` suite encodes the rules the validator enforces that the exporter
+could plausibly break — strictly increasing stop times and shape distances, no
+unnamed stop, no single-stop trip, no overlapping frequency rows — so a
+regression should surface there before it reaches a jar.
+
 ## Tests
 
 No database and no OSRM needed — the tests build synthetic traces with injected
@@ -216,9 +363,17 @@ out by hand, written into the test alongside the arithmetic that produced them,
 and against a brute-force enumeration of every monotone coupling — the
 definition itself, at exponential cost, so only on inputs of a few points.
 Clustering is tested on traces built along known corridors, so the routes and
-stops it *should* find are known by construction. Persistence is the one part
-with no automated coverage: it needs PostGIS, and the rest of the suite
-deliberately needs no database.
+stops it *should* find are known by construction.
+
+The GTFS tests build routes, stops and departure times directly, so every field
+the feed should contain is known too. Departures are built in UTC, as the
+database stores them, and asserted against Africa/Harare bands — a 05:30 UTC
+departure belongs to the morning peak, and reading it as 05:30 local would file
+it two bands away.
+
+Persistence is the part with no automated coverage: `cluster.persist_network`
+and `gtfs.load_export_network` are the two functions that need PostGIS, and the
+rest of the suite deliberately needs no database.
 
 ## Visual inspection
 

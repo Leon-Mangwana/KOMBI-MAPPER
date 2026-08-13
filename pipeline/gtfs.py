@@ -1132,7 +1132,14 @@ def main(argv: list[str] | None = None) -> int:
     for route in routes:
         if len(route.stops) < 2:
             continue
-        headways = estimate_headways(route.departures, zone, fill_unobserved_bands=args.fill_bands)
+        # The same call `build_feed` made, so the summary describes the file
+        # that was actually written.
+        headways = estimate_headways(
+            route.departures,
+            zone,
+            default_headway_s=args.default_headway_s,
+            fill_unobserved_bands=args.fill_bands,
+        )
         measured = sum(1 for headway in headways if headway.measured)
         print(
             f"  route {route.route_id}: {len(route.stops)} stop(s), "
