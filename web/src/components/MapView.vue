@@ -95,9 +95,7 @@ function frameNetwork(): void {
   if (extended) map.fitBounds(bounds, { padding: FIT_PADDING, duration: 0, maxZoom: 14 })
 }
 
-defineExpose({ frameNetwork })
-
-function showStopPopup(event: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }): void {
+function showStopPopup(event: maplibregl.MapLayerMouseEvent): void {
   if (!map) return
   const feature = event.features?.[0]
   if (!feature || feature.geometry.type !== 'Point') return

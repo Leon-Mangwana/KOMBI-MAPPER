@@ -1,0 +1,38 @@
+name: capture
+
+on:
+  push:
+    paths:
+      - "capture/**"
+      - ".github/workflows/capture.yml"
+  pull_request:
+    paths:
+      - "capture/**"
+      - ".github/workflows/capture.yml"
+
+defaults:
+  run:
+    working-directory: capture
+
+jobs:
+  typecheck-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: capture/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      # Also proves the service worker and manifest still generate.
+      - name: Build
+        run: npm run build

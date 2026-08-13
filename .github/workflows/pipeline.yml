@@ -1,0 +1,45 @@
+name: pipeline
+
+on:
+  push:
+    paths:
+      - "pipeline/**"
+      - ".github/workflows/pipeline.yml"
+  pull_request:
+    paths:
+      - "pipeline/**"
+      - ".github/workflows/pipeline.yml"
+
+defaults:
+  run:
+    working-directory: pipeline
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    # No services: the pipeline suite drives pure functions over synthetic
+    # traces and a mocked OSRM, so it needs neither Postgres nor a matcher.
+    # The functions that do touch the database are thin and covered by the API
+    # suite, which has PostGIS.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Ruff (format check)
+        run: ruff format --check .
+
+      - name: Pytest
+        run: pytest -v

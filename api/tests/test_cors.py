@@ -11,6 +11,7 @@ from app.config import settings
 from app.main import app
 
 CAPTURE_ORIGIN = "http://localhost:5173"
+WEB_ORIGIN = "http://localhost:5174"
 
 client = TestClient(app)
 
@@ -39,6 +40,13 @@ def test_preflight_for_trace_upload_is_allowed():
     assert "content-type" in resp.headers["access-control-allow-headers"].lower()
 
 
+def test_web_map_origin_is_allowed():
+    """The public map reads /routes and /stops from its own origin."""
+    resp = client.get("/health", headers={"Origin": WEB_ORIGIN})
+
+    assert resp.headers["access-control-allow-origin"] == WEB_ORIGIN
+
+
 def test_unknown_origin_gets_no_cors_header():
     resp = client.get("/health", headers={"Origin": "https://evil.example"})
 
@@ -51,3 +59,4 @@ def test_cors_origins_parses_comma_separated_value():
         origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()
     ]
     assert CAPTURE_ORIGIN in settings.cors_origin_list
+    assert WEB_ORIGIN in settings.cors_origin_list

@@ -49,7 +49,24 @@ Interactive docs at http://localhost:8000/docs.
   All points are bulk-inserted in a single transaction.
 - `GET /traces/{id}` — returns the trace as a GeoJSON `Feature` (a `LineString`
   of its ordered points, with per-point attributes in `properties.points`).
+- `GET /routes` — every canonical route as a GeoJSON `FeatureCollection`.
+  `?include_geometry=false` drops the lines for a light index of the network.
+- `GET /routes/{id}` — one route as a `Feature`, with its stops in travel order
+  in `properties.stops`.
+- `GET /stops` — every stop as a `FeatureCollection`, each carrying the
+  `route_ids` that serve it.
 - `GET /gtfs.zip` — the exported GTFS feed. See below.
+
+The network endpoints answer with GeoJSON because that is what MapLibre takes as
+a source body: [`../web`](../web/README.md) hands the response straight to the
+map with no reshaping. They are unpaged — the whole network is a few dozen
+routes for one city, and a map draws all of them at once.
+
+`routes`, `stops` and `route_stops` are written by
+[`../pipeline/cluster.py`](../pipeline/README.md#clustering) and only read here,
+the reverse of `traces`. A response describes the last clustering run and is
+stable until the next one. `short_name`, `long_name` and `stops.name` are the
+columns clustering cannot fill in — they stay null until somebody names them.
 
 ## GTFS
 
@@ -92,17 +109,18 @@ pytest
 
 ## CORS
 
-The capture PWA uploads traces with `fetch()` from its own origin, so that
-origin must be allowed or the browser blocks the request. Set `CORS_ORIGINS` in
-`.env` (comma-separated); it defaults to the Vite dev server and `vite preview`:
+Both front ends call the API with `fetch()` from their own origins, so those
+origins must be allowed or the browser blocks the requests. Set `CORS_ORIGINS`
+in `.env` (comma-separated); it defaults to the Vite dev server and
+`vite preview` for each app — capture on 5173, the web map on 5174:
 
 ```
-CORS_ORIGINS=http://localhost:5173,http://localhost:4173
+CORS_ORIGINS=http://localhost:5173,http://localhost:4173,http://localhost:5174,http://localhost:4174
 ```
 
 Testing capture on a phone through a tunnel means adding that URL too, e.g.
-`https://something.trycloudflare.com`. Credentials are not allowed — uploads
-carry no cookies or auth headers.
+`https://something.trycloudflare.com`. Credentials are not allowed — no request
+carries cookies or auth headers.
 
 ## Notes
 

@@ -18,13 +18,18 @@ class Settings(BaseSettings):
     # never builds it — see app/routers/gtfs.py.
     gtfs_path: Path = _DEFAULT_GTFS_PATH
 
-    # Browser origins allowed to call the API. The capture PWA uploads traces
-    # with fetch(), so its origin must be listed here or the browser will block
-    # the request. Defaults cover the Vite dev server and `vite preview`.
+    # Browser origins allowed to call the API. Both front ends use fetch(), so
+    # their origins must be listed here or the browser will block the requests.
+    # Defaults cover the Vite dev server and `vite preview` for each: capture on
+    # 5173/4173, web on 5174/4174. The two ports per app are pinned in their
+    # vite.config.ts so this list can name them.
     #
     # Comma-separated rather than a list field: pydantic-settings expects JSON
     # for complex types, which is awkward to write in a .env file.
-    cors_origins: str = "http://localhost:5173,http://localhost:4173"
+    cors_origins: str = (
+        "http://localhost:5173,http://localhost:4173,"
+        "http://localhost:5174,http://localhost:4174"
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
