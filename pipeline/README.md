@@ -63,6 +63,14 @@ and the clustered network is exported as a GTFS feed:
 python gtfs.py                # writes gtfs_out/gtfs.zip
 ```
 
+When the API is deployed somewhere the pipeline is not, it cannot serve a file
+this machine wrote. Export into the web app's static folder instead, and commit
+it — see [`../web/README.md`](../web/README.md):
+
+```bash
+python gtfs.py -o ../web/public/gtfs.zip
+```
+
 In practice none of that is run by hand — `process.py` is the job that does it:
 
 ```bash

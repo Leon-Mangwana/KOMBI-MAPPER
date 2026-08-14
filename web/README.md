@@ -42,6 +42,25 @@ The built-in pmtiles style deliberately has no labels, so it needs no glyph
 server. Point `VITE_BASEMAP_STYLE_URL` at a style with a `glyphs` URL if you
 want place names.
 
+## The GTFS feed in a split deployment
+
+The header's **GTFS feed** link points at the API's `/gtfs.zip` by default,
+which is right when the API and the pipeline run on one machine.
+
+They usually don't in production: the API is on a hosting platform and the
+pipeline runs on an operator's laptop, so the API has no copy of the file and
+that URL is a permanent 404. Export the feed into this app's `public/` folder
+instead and serve it from the same origin as the map:
+
+```bash
+cd pipeline
+python gtfs.py -o ../web/public/gtfs.zip
+```
+
+Then set `VITE_GTFS_URL=/gtfs.zip` and redeploy. The feed is committed and ships
+with the site, so publishing a new one is a commit and a deploy — which also
+gives you a history of what was published when.
+
 ## What it draws
 
 | Layer              | What                                                     |
