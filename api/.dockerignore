@@ -1,0 +1,14 @@
+# The image installs from pyproject.toml; everything below is either rebuilt
+# inside the image or must never reach it.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Tests need a live PostGIS and are not run from the image.
+tests/
+
+# Local secrets. The deployed API reads its configuration from the environment.
+.env

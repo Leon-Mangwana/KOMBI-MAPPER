@@ -1,0 +1,35 @@
+# Render blueprint for the API.
+#
+# The two front ends are on Netlify (see netlify.toml) and the pipeline runs on
+# an operator's machine, so this deploys one service: FastAPI in Docker.
+#
+# The database is deliberately *not* declared here. Render's free Postgres is
+# deleted after 30 days, which is a bad place to keep the only copy of
+# contributed traces. Point DATABASE_URL at a Supabase or Neon project instead —
+# both have PostGIS and a persistent free tier. See api/README.md#deployment.
+
+services:
+  - type: web
+    name: kombi-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    plan: free
+    region: frankfurt # closest of Render's regions to Zimbabwe
+    healthCheckPath: /health
+
+    envVars:
+      # Set both in the Render dashboard — `sync: false` means "prompt me, do
+      # not store it in the repository".
+      #
+      # DATABASE_URL must use the psycopg driver and request TLS:
+      #   postgresql+psycopg://USER:PASSWORD@HOST:5432/postgres?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+
+      # Comma-separated origins of the deployed front ends, e.g.
+      #   https://hilarious-souffle-6b60ca.netlify.app
+      # A missing origin here is the single most common cause of a deployed map
+      # that loads but shows "Could not reach the route server".
+      - key: CORS_ORIGINS
+        sync: false
