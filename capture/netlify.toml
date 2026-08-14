@@ -1,0 +1,33 @@
+# Netlify configuration for the capture PWA.
+#
+# This repository is a monorepo, so the Netlify site must have its **base
+# directory** set to `capture`. Netlify then reads this file from inside that
+# directory, and `publish` below resolves to `capture/dist`. With no base
+# directory set, Netlify builds from the repository root, finds no
+# package.json, and publishes nothing — a 404 on the site root.
+#
+# The public map is a second site from this same repository, with its base
+# directory set to `web`.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 7 requires Node 20.19+ or 22.12+. Netlify's default has been older
+  # than that, and the failure ("crypto.hash is not a function") does not
+  # obviously point at the Node version.
+  NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# The service worker must never be served from cache, or an installed PWA can
+# pin itself to an old build and stop updating. vite-plugin-pwa emits sw.js at
+# the root of the publish directory.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

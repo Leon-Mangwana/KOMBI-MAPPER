@@ -1,0 +1,28 @@
+# Netlify configuration for the public map.
+#
+# This repository is a monorepo, so the Netlify site must have its **base
+# directory** set to `web`. Netlify then reads this file from inside that
+# directory, and `publish` below resolves to `web/dist`. With no base directory
+# set, Netlify builds from the repository root, finds no package.json, and
+# publishes nothing — which is what a 404 on the site root means.
+#
+# The capture PWA is a second site from this same repository, with its base
+# directory set to `capture`.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite 7 requires Node 20.19+ or 22.12+. Netlify's default has been older
+  # than that, and the failure ("crypto.hash is not a function") does not
+  # obviously point at the Node version.
+  NODE_VERSION = "22"
+
+# The app is a single page with no router, so this only matters for typos and
+# refreshes on a path — but without it those return Netlify's 404 instead of
+# the app.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
