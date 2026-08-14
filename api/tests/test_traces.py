@@ -1,5 +1,21 @@
 import pytest
 
+from app.config import settings
+
+ADMIN_TOKEN = "test-admin-token"
+
+
+@pytest.fixture()
+def admin(monkeypatch):
+    """Configure the operator token and return the header that presents it.
+
+    `GET /traces/{id}` is operator-only — it returns a contributor's raw,
+    timestamped ride. See app/security.py.
+    """
+    monkeypatch.setattr(settings, "admin_token", ADMIN_TOKEN)
+    return {"X-Admin-Token": ADMIN_TOKEN}
+
+
 # A short trace through central Harare.
 SAMPLE_POINTS = [
     {
@@ -35,12 +51,12 @@ def test_post_trace_creates_trace_and_points(client):
     assert body["point_count"] == 3
 
 
-def test_get_trace_returns_geojson_feature(client):
+def test_get_trace_returns_geojson_feature(client, admin):
     trace_id = client.post("/traces", json={"contributor": "leon", "points": SAMPLE_POINTS}).json()[
         "id"
     ]
 
-    resp = client.get(f"/traces/{trace_id}")
+    resp = client.get(f"/traces/{trace_id}", headers=admin)
 
     assert resp.status_code == 200
     feature = resp.json()
@@ -68,8 +84,8 @@ def test_get_trace_returns_geojson_feature(client):
     assert points[2]["accuracy_m"] is None
 
 
-def test_get_missing_trace_returns_404(client):
-    resp = client.get("/traces/999999")
+def test_get_missing_trace_returns_404(client, admin):
+    resp = client.get("/traces/999999", headers=admin)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Trace not found."
 

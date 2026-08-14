@@ -30,6 +30,44 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://localhost:4173,http://localhost:5174,http://localhost:4174"
     )
 
+    # Shared secret for the operator-only endpoints, sent as `X-Admin-Token`.
+    #
+    # Empty by default, and an empty token does not mean "no authentication
+    # required" — it means those endpoints are unavailable. Failing closed
+    # matters here because the endpoint it guards returns one contributor's
+    # complete timestamped movement history, and a deployment that forgot to
+    # set this would otherwise publish it.
+    admin_token: str = ""
+
+    # --- Ingest limits -----------------------------------------------------
+    #
+    # `POST /traces` is open by design: contribution is the point, and requiring
+    # an account would cost more traces than it saved. Open does not mean
+    # unbounded, so the limits below are what stands between the database and
+    # anybody with curl.
+
+    # Points one trace may contain. 20 000 is about five and a half hours at the
+    # 1 Hz the capture PWA records at — far beyond any real kombi ride, while
+    # still rejecting a payload built to exhaust memory.
+    max_trace_points: int = 20_000
+
+    # Largest body accepted on an upload. A full-length trace is roughly 2.5 MB
+    # of JSON, so this leaves generous headroom and still refuses a body that
+    # would be parsed before any field limit could apply.
+    max_upload_bytes: int = 8_000_000
+
+    # Uploads allowed per client per window. A contributor finishing a ride
+    # sends one trace; the queue may flush a few at once after a spell offline,
+    # which is what the per-minute allowance is sized for.
+    uploads_per_minute: int = 6
+    uploads_per_hour: int = 40
+
+    # Read the client address from `X-Forwarded-For`. Required behind a
+    # platform proxy (Render, Fly, a CDN) — without it every request appears to
+    # come from the proxy and one abuser rate-limits everybody. Turn it off when
+    # the API is exposed directly, where the header is attacker-controlled.
+    trust_proxy_headers: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

@@ -8,19 +8,19 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Trace, TracePoint
 from ..schemas import TraceCreated, TraceIn
+from ..security import require_admin
 
 router = APIRouter(prefix="/traces", tags=["traces"])
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=TraceCreated)
 def create_trace(payload: TraceIn, db: Session = Depends(get_db)) -> TraceCreated:
-    """Bulk-insert a trace and all its points in a single transaction."""
-    if not payload.points:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A trace must contain at least one point.",
-        )
+    """Bulk-insert a trace and all its points in a single transaction.
 
+    Open to anyone: contribution is the point of the project, and an account
+    requirement would cost more traces than it saved. The bounds on what may be
+    sent are on `TraceIn` and in the middleware — see app/security.py.
+    """
     recorded_ats = [p.recorded_at for p in payload.points if p.recorded_at is not None]
     trace = Trace(
         contributor=payload.contributor,
@@ -54,9 +54,18 @@ def create_trace(payload: TraceIn, db: Session = Depends(get_db)) -> TraceCreate
     )
 
 
-@router.get("/{trace_id}")
+@router.get("/{trace_id}", dependencies=[Depends(require_admin)])
 def get_trace(trace_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
-    """Return a trace as a GeoJSON Feature (LineString of its ordered points)."""
+    """Return a trace as a GeoJSON Feature (LineString of its ordered points).
+
+    **Operator-only.** This is one contributor's raw ride: their name, every
+    position they passed through, and the time they were there. Trace ids are
+    sequential, so an open version of this endpoint could be walked from 1
+    upwards to reconstruct where individual people travel. The public view of
+    the data is `/routes` and `/stops`, which are aggregates over many riders.
+
+    Requires `X-Admin-Token`; see app/security.py.
+    """
     trace = db.get(Trace, trace_id)
     if trace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trace not found.")

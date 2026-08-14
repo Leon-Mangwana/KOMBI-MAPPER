@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import time
 
 import httpx
 from shapely.geometry import LineString
@@ -115,9 +116,24 @@ def build_points(seed: int, waypoints: tuple[tuple[float, float], ...]) -> list[
 
 
 def upload(client: httpx.Client, contributor: str, points: list[dict]) -> int:
-    response = client.post("/traces", json={"contributor": contributor, "points": points})
-    response.raise_for_status()
-    return int(response.json()["id"])
+    """Upload one trace, waiting out the API's rate limit if it asks us to.
+
+    Ingest is rate-limited per client (see api/app/security.py), and seeding a
+    dozen traces back to back is exactly the burst that limit exists to refuse.
+    Honouring `Retry-After` rather than raising both keeps the tool working and
+    keeps the limit real — the alternative, an exemption for seeding, would mean
+    the limit was never exercised by the one client that reliably trips it.
+    """
+    while True:
+        response = client.post("/traces", json={"contributor": contributor, "points": points})
+
+        if response.status_code != httpx.codes.TOO_MANY_REQUESTS:
+            response.raise_for_status()
+            return int(response.json()["id"])
+
+        delay = float(response.headers.get("retry-after", "60"))
+        logger.info("Rate limited by the API; waiting %.0f s before the next upload.", delay)
+        time.sleep(delay)
 
 
 def fake_match(trace_id: int) -> None:

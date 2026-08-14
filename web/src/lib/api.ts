@@ -54,7 +54,19 @@ export class ApiError extends Error {
   }
 }
 
-export const gtfsUrl = `${API_BASE_URL}/gtfs.zip`
+/**
+ * Where the GTFS feed is downloaded from.
+ *
+ * Defaults to the API, which serves the file `pipeline/gtfs.py` wrote — correct
+ * when both run on one machine, as they do in development.
+ *
+ * A split deployment breaks that: the API on a hosting platform and the
+ * pipeline on an operator's laptop share no filesystem, so `GET /gtfs.zip`
+ * there is a permanent 404. Set `VITE_GTFS_URL=/gtfs.zip` and have the export
+ * write into `web/public/`, and the feed is served as a static file from this
+ * app's own origin instead. See ../../README.md.
+ */
+export const gtfsUrl = import.meta.env.VITE_GTFS_URL ?? `${API_BASE_URL}/gtfs.zip`
 
 export async function fetchRoutes(signal?: AbortSignal): Promise<RouteCollection> {
   return await getJson<RouteCollection>('/routes', signal)

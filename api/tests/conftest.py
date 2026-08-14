@@ -16,6 +16,22 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401  -- populate metadata before create_all
 from app.database import Base, get_db
 from app.main import app
+from app.security import ingest_limiter
+
+
+@pytest.fixture(autouse=True)
+def fresh_rate_limits():
+    """Clear the upload rate limiter around every test.
+
+    The limiter is process-wide and deliberately has no expiry short enough to
+    matter here, so without this a suite that uploads more traces than the
+    per-minute allowance would start failing partway through — and would do it
+    only when the tests ran quickly, which is the worst kind of flake.
+    """
+    ingest_limiter.reset()
+    yield
+    ingest_limiter.reset()
+
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",

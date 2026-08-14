@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string
+  readonly VITE_GTFS_URL?: string
   readonly VITE_BASEMAP_STYLE_URL?: string
   readonly VITE_PMTILES_URL?: string
   readonly VITE_MAP_CENTER_LON?: string
