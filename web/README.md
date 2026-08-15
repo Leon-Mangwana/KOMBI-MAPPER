@@ -38,9 +38,21 @@ With neither set the app falls back to a blank dark background. The routes and
 stops still draw, which is enough to check the pipeline's output before you host
 tiles.
 
-The built-in pmtiles style deliberately has no labels, so it needs no glyph
-server. Point `VITE_BASEMAP_STYLE_URL` at a style with a `glyphs` URL if you
-want place names.
+Cutting a Harare extract and hosting it is documented in
+[../infra/README.md](../infra/README.md#basemap-tiles) — it is one file behind
+HTTP range requests, not a tile server.
+
+### Labels
+
+Set `VITE_GLYPHS_URL` as well and the style adds suburb and street names. Both
+are needed: MapLibre cannot draw text without glyph files, and a style that asks
+for labels without them renders none while logging an error per tile — so labels
+are all or nothing, and the default is off.
+
+Suburb names are the point of a map like this. "Does this go to Highfield?" is
+the question a reader arrives with, and the answer is unreachable if nothing on
+the map says Highfield. Street names appear from zoom 13, where the route lines
+are no longer the only thing worth reading.
 
 ## The GTFS feed in a split deployment
 

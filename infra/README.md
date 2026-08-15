@@ -144,6 +144,113 @@ worthwhile: informal routes often use roads that OSM only recently acquired.
 | Port 5000 already bound (macOS) | AirPlay Receiver listens on 5000. Turn it off, or remap to `"5050:5000"` and set `OSRM_URL=http://localhost:5050`. |
 | `osrm-extract` killed, or exits 137 | Out of memory. Raise Docker Desktop's memory limit to 6 GB or more. |
 
+## Basemap tiles
+
+Both front ends render on a blank background until they are pointed at a
+basemap. Protomaps only — this project does not use Mapbox.
+
+A [PMTiles](https://protomaps.com/) archive is a **single file** the browser
+reads with HTTP range requests, so "hosting tiles" means putting one file
+somewhere that serves ranges and allows CORS. There is no tile server to run,
+which is why this section is much shorter than the OSRM one above.
+
+### 1. Cut a Harare extract
+
+Protomaps publishes a daily planet build. The `pmtiles` CLI can slice a bounding
+box straight out of it over the network, downloading only the tiles inside the
+box rather than the whole planet:
+
+```bash
+# Windows: grab pmtiles.exe from the same releases page.
+# https://github.com/protomaps/go-pmtiles/releases
+
+pmtiles extract https://build.protomaps.com/YYYYMMDD.pmtiles harare.pmtiles \
+  --bbox=30.60,-18.20,31.45,-17.55 \
+  --maxzoom=14
+```
+
+Use the most recent date listed at <https://build.protomaps.com/>.
+
+The bounding box is Harare **plus Norton, Ruwa and Chitungwiza**, for the same
+reason the OSRM extract is the whole country: kombi routes run out to all three,
+and a route leaving the box would cross a hole in the map.
+
+`--maxzoom=14` is enough to read a street layout; each further zoom level is
+roughly four times the size, and 15 mainly adds building footprints. Expect tens
+of megabytes at 14.
+
+### 2. Put it somewhere with ranges and CORS
+
+**Cloudflare R2** is the usual home: 10 GB free, no egress charges, and range
+requests work out of the box.
+
+1. Create a bucket and upload `harare.pmtiles`.
+2. Attach a custom domain. The `r2.dev` public URL is rate-limited and
+   explicitly not for production use.
+3. Add a CORS policy, or the browser will refuse every range request:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://your-site.netlify.app"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["range", "if-match"],
+    "ExposeHeaders": ["etag", "content-range", "content-length"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+`ExposeHeaders` matters as much as the origin — without `content-range` the
+client cannot tell what it was given back.
+
+For a small extract you can instead drop the file in `web/public/` and let
+Netlify serve it from the site's own origin, which needs no CORS at all. The
+trade is that a binary in git stays in the history forever and grows the clone
+for everyone, so it is only reasonable for something in the low tens of
+megabytes that you will not re-cut often.
+
+### 3. Fonts, if you want labels
+
+Map labels need glyph files, and a style asking for text without them renders
+nothing while logging an error per tile. Self-host Protomaps' font assets rather
+than hot-linking someone else's:
+
+```bash
+git clone --depth 1 https://github.com/protomaps/basemaps-assets
+cp -r basemaps-assets/fonts ../web/public/fonts
+```
+
+Then set `VITE_GLYPHS_URL=/fonts/{fontstack}/{range}.pbf`. The braces are part of
+the URL template — MapLibre fills them in.
+
+Labels are worth having on the public map: "does this go to Highfield?" is the
+question it exists to answer, and suburb names are how a reader finds Highfield.
+The capture PWA deliberately stays label-free — it is a backdrop for a live
+position on a phone, where labels are clutter and extra download.
+
+### 4. Point the apps at it
+
+Set these in each Netlify site's environment variables and redeploy — Vite bakes
+them in at build time, so a redeploy is required, not a restart:
+
+| Variable | Value |
+| -------- | ----- |
+| `VITE_PMTILES_URL` | `https://tiles.example.org/harare.pmtiles` |
+| `VITE_GLYPHS_URL` | `/fonts/{fontstack}/{range}.pbf` (web only) |
+
+Locally, put the same lines in `web/.env` and `capture/.env`.
+
+To verify: the map should show land, water and roads instead of flat dark blue.
+If it stays blank, the browser console will say which — a CORS rejection, a 404,
+or a 403 from a bucket that is not public.
+
+### Refreshing
+
+Re-run the extract against a newer build and replace the file. Nothing else
+changes; the URL stays the same and the apps need no redeploy. Worth doing after
+a mapping push in Harare, since new roads appear in OSM first.
+
 ## Database
 
 Postgres comes up with database `kombi` (user/pass `postgres`/`postgres`) on a

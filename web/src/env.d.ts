@@ -5,6 +5,7 @@ interface ImportMetaEnv {
   readonly VITE_GTFS_URL?: string
   readonly VITE_BASEMAP_STYLE_URL?: string
   readonly VITE_PMTILES_URL?: string
+  readonly VITE_GLYPHS_URL?: string
   readonly VITE_MAP_CENTER_LON?: string
   readonly VITE_MAP_CENTER_LAT?: string
   readonly VITE_MAP_ZOOM?: string

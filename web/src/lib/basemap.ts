@@ -14,7 +14,7 @@
  * colours differ: this map is a reference document people read, the capture one
  * is a backdrop for a live position.
  */
-import maplibregl, { type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type LayerSpecification, type StyleSpecification } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 
 const BACKGROUND = '#0b1220'
@@ -36,10 +36,72 @@ function blankStyle(): StyleSpecification {
   }
 }
 
+/**
+ * Place and street labels, drawn on top of everything else.
+ *
+ * Only included when `VITE_GLYPHS_URL` points at a font source. Text in a
+ * MapLibre style needs glyph PBFs, and a style that asks for `text-field`
+ * without a `glyphs` URL renders no labels while logging an error per tile —
+ * so labels are all-or-nothing and the default stays label-free.
+ *
+ * Font stack is Noto Sans, which is what Protomaps' own assets bundle publishes.
+ * A different glyph source means changing these names to match what it has.
+ */
+function labelLayers(): LayerSpecification[] {
+  return [
+    {
+      // Street names only close in. At city zooms the route lines are the
+      // subject, and road labels under them are noise.
+      id: 'road-labels',
+      type: 'symbol',
+      source: 'protomaps',
+      'source-layer': 'roads',
+      minzoom: 13,
+      filter: ['has', 'name'],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': 11,
+      },
+      paint: {
+        'text-color': '#93a5c4',
+        // A halo in the background colour is what keeps a label readable where
+        // it crosses a route line.
+        'text-halo-color': BACKGROUND,
+        'text-halo-width': 1.4,
+      },
+    },
+    {
+      id: 'place-labels',
+      type: 'symbol',
+      source: 'protomaps',
+      'source-layer': 'places',
+      filter: ['in', ['get', 'kind'], ['literal', ['locality', 'neighbourhood', 'suburb']]],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Medium'],
+        // Suburb names are what somebody reads a kombi map for — "does this go
+        // to Highfield?" — so they grow with zoom rather than staying fine print.
+        'text-size': ['interpolate', ['linear'], ['zoom'], 10, 11, 15, 16],
+      },
+      paint: {
+        'text-color': '#dbe4f3',
+        'text-halo-color': BACKGROUND,
+        'text-halo-width': 1.6,
+      },
+    },
+  ]
+}
+
 function pmtilesStyle(url: string): StyleSpecification {
   registerPmtilesProtocol()
+
+  const glyphs = import.meta.env.VITE_GLYPHS_URL
+
   return {
     version: 8,
+    ...(glyphs ? { glyphs } : {}),
     sources: {
       protomaps: {
         type: 'vector',
@@ -91,6 +153,7 @@ function pmtilesStyle(url: string): StyleSpecification {
           'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 8, 0.4, 14, 1.6, 18, 6],
         },
       },
+      ...(glyphs ? labelLayers() : []),
     ],
   }
 }
