@@ -16,11 +16,13 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Route, RouteStop, Stop, Trace
+from ..schemas import RouteUpdate, StopUpdate
+from ..security import require_admin
 
 router = APIRouter(tags=["network"])
 
@@ -134,20 +136,98 @@ def list_stops(db: Session = Depends(get_db)) -> dict[str, Any]:
     for stop_id, route_id in links:
         serving.setdefault(stop_id, []).append(route_id)
 
-    features = [
-        {
-            "type": "Feature",
-            "id": stop_id,
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {
-                "id": stop_id,
-                "name": name,
-                "route_ids": serving.get(stop_id, []),
-            },
-        }
-        for stop_id, name, lon, lat in rows
-    ]
+    features = [_stop_feature(row, route_ids=serving.get(row[0], [])) for row in rows]
     return {"type": "FeatureCollection", "features": features}
+
+
+# --------------------------------------------------------------------------
+# Naming — operator-only
+# --------------------------------------------------------------------------
+#
+# `short_name`, `long_name` and `stops.name` are the only columns in these
+# tables a machine cannot produce: a cluster of GPS traces has no idea it is the
+# Mbare route. They are also what makes the map and the GTFS feed legible to a
+# passenger, so they are worth a person's time — and worth protecting from
+# anyone else's. Hence the admin token.
+#
+# Names set here survive re-clustering: `pipeline/naming.py` matches each new
+# cluster to the named row it replaces and carries the name over.
+
+
+@router.patch("/routes/{route_id}", dependencies=[Depends(require_admin)])
+def update_route(
+    route_id: int, payload: RouteUpdate, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    """Set or clear a route's names. Returns the route as `GET /routes/{id}` does.
+
+    PATCH semantics: an omitted field is left as it was, and an explicit `null`
+    clears it. Sending `{}` changes nothing and is refused, since it is more
+    likely a mistake than an intention.
+    """
+    values = _clean(payload.model_dump(exclude_unset=True))
+    _apply(db, Route, route_id, values, "Route not found.")
+    return get_route(route_id, db)
+
+
+@router.patch("/stops/{stop_id}", dependencies=[Depends(require_admin)])
+def update_stop(stop_id: int, payload: StopUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Set or clear a stop's name. See `update_route` for the semantics."""
+    values = _clean(payload.model_dump(exclude_unset=True))
+    _apply(db, Stop, stop_id, values, "Stop not found.")
+
+    row = db.execute(
+        select(Stop.id, Stop.name, func.ST_X(Stop.geom), func.ST_Y(Stop.geom)).where(
+            Stop.id == stop_id
+        )
+    ).one()
+    return _stop_feature(row, route_ids=_serving(db, stop_id))
+
+
+def _clean(values: dict[str, Any]) -> dict[str, Any]:
+    """Trim the supplied names; treat blank as a request to clear.
+
+    `"  "` and `""` are what an emptied text box sends, and storing either would
+    give a route a name that renders as nothing — worse than unnamed, because
+    the fallback label would stop appearing.
+    """
+    if not values:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Supply at least one field to change.",
+        )
+
+    return {
+        key: (value.strip() or None) if isinstance(value, str) else value
+        for key, value in values.items()
+    }
+
+
+def _apply(db: Session, model: type, row_id: int, values: dict[str, Any], missing: str) -> None:
+    """Run the update, or 404 if there is no such row."""
+    result = db.execute(update(model).where(model.id == row_id).values(**values))
+    if result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=missing)
+    db.commit()
+
+
+def _serving(db: Session, stop_id: int) -> list[int]:
+    return [
+        route_id
+        for (route_id,) in db.execute(
+            select(RouteStop.route_id).where(RouteStop.stop_id == stop_id).order_by(RouteStop.seq)
+        ).all()
+    ]
+
+
+def _stop_feature(row: Any, *, route_ids: list[int]) -> dict[str, Any]:
+    stop_id, name, lon, lat = row
+    return {
+        "type": "Feature",
+        "id": stop_id,
+        "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        "properties": {"id": stop_id, "name": name, "route_ids": route_ids},
+    }
 
 
 def _route_feature(

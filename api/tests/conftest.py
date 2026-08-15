@@ -14,9 +14,23 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401  -- populate metadata before create_all
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.security import ingest_limiter
+
+ADMIN_TOKEN = "test-admin-token"
+
+
+@pytest.fixture()
+def admin(monkeypatch):
+    """Configure the operator token and return the header that presents it.
+
+    Guards the endpoints that read a contributor's raw ride or write the names
+    a person supplied — see app/security.py.
+    """
+    monkeypatch.setattr(settings, "admin_token", ADMIN_TOKEN)
+    return {"X-Admin-Token": ADMIN_TOKEN}
 
 
 @pytest.fixture(autouse=True)

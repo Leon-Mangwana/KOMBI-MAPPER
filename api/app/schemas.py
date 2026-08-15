@@ -27,3 +27,21 @@ class TraceCreated(BaseModel):
     contributor: str
     status: str
     point_count: int
+
+
+class RouteUpdate(BaseModel):
+    """Names for a route. Operator-supplied — clustering cannot produce them.
+
+    A true PATCH: an omitted field is left alone, and an explicit `null` clears
+    the name. The difference is read from `model_fields_set`, so the two cases
+    have to stay distinguishable — do not give these defaults any other meaning.
+    """
+
+    short_name: str | None = Field(default=None, max_length=255)
+    long_name: str | None = Field(default=None, max_length=255)
+
+
+class StopUpdate(BaseModel):
+    """A name for a stop. See `RouteUpdate` for the PATCH semantics."""
+
+    name: str | None = Field(default=None, max_length=255)

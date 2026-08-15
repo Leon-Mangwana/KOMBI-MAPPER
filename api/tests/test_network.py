@@ -189,6 +189,91 @@ def test_a_stop_names_every_route_that_serves_it(client, network):
     assert serving[network["stops"]["mbare"]] == [network["route_a"]]
 
 
+# --------------------------------------------------------------------------
+# Naming
+# --------------------------------------------------------------------------
+
+
+def test_naming_a_route_sets_both_fields(client, network, admin):
+    resp = client.patch(
+        f"/routes/{network['route_a']}",
+        json={"short_name": "4", "long_name": "CBD - Mbare"},
+        headers=admin,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["properties"]["short_name"] == "4"
+    assert client.get("/routes").json()["features"][0]["properties"]["long_name"] == "CBD - Mbare"
+
+
+def test_an_omitted_field_is_left_alone(client, network, admin):
+    """PATCH, not PUT: naming the short name must not wipe the long one."""
+    client.patch(f"/routes/{network['route_a']}", json={"long_name": "CBD - Mbare"}, headers=admin)
+    client.patch(f"/routes/{network['route_a']}", json={"short_name": "4"}, headers=admin)
+
+    props = client.get(f"/routes/{network['route_a']}").json()["properties"]
+
+    assert (props["short_name"], props["long_name"]) == ("4", "CBD - Mbare")
+
+
+def test_an_explicit_null_clears_a_name(client, network, admin):
+    resp = client.patch(f"/routes/{network['route_a']}", json={"short_name": None}, headers=admin)
+
+    assert resp.json()["properties"]["short_name"] is None
+    assert resp.json()["properties"]["long_name"] == "CBD - Mbare", "the other field is untouched"
+
+
+def test_a_blank_name_clears_rather_than_storing_whitespace(client, network, admin):
+    """What an emptied text box sends. Storing it would render as an invisible name."""
+    resp = client.patch(f"/routes/{network['route_a']}", json={"short_name": "   "}, headers=admin)
+
+    assert resp.json()["properties"]["short_name"] is None
+
+
+def test_names_are_trimmed(client, network, admin):
+    resp = client.patch(
+        f"/routes/{network['route_a']}", json={"short_name": "  4  "}, headers=admin
+    )
+
+    assert resp.json()["properties"]["short_name"] == "4"
+
+
+def test_an_empty_patch_is_refused(client, network, admin):
+    resp = client.patch(f"/routes/{network['route_a']}", json={}, headers=admin)
+
+    assert resp.status_code == 422
+
+
+def test_naming_a_missing_route_is_a_404(client, network, admin):
+    resp = client.patch("/routes/999999", json={"short_name": "4"}, headers=admin)
+
+    assert resp.status_code == 404
+
+
+def test_naming_a_stop(client, network, admin):
+    resp = client.patch(
+        f"/stops/{network['stops']['mbare']}", json={"name": "Mbare Musika"}, headers=admin
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["properties"]["name"] == "Mbare Musika"
+    assert resp.json()["properties"]["route_ids"] == [network["route_a"]]
+
+
+def test_naming_a_missing_stop_is_a_404(client, network, admin):
+    resp = client.patch("/stops/999999", json={"name": "Nowhere"}, headers=admin)
+
+    assert resp.status_code == 404
+
+
+def test_a_name_that_is_too_long_is_rejected(client, network, admin):
+    resp = client.patch(
+        f"/routes/{network['route_a']}", json={"short_name": "x" * 256}, headers=admin
+    )
+
+    assert resp.status_code == 422
+
+
 def test_stop_with_no_routes_reports_an_empty_list(client, engine):
     with engine.begin() as conn:
         conn.execute(

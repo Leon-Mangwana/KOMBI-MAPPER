@@ -1,20 +1,7 @@
 import pytest
 
-from app.config import settings
-
-ADMIN_TOKEN = "test-admin-token"
-
-
-@pytest.fixture()
-def admin(monkeypatch):
-    """Configure the operator token and return the header that presents it.
-
-    `GET /traces/{id}` is operator-only — it returns a contributor's raw,
-    timestamped ride. See app/security.py.
-    """
-    monkeypatch.setattr(settings, "admin_token", ADMIN_TOKEN)
-    return {"X-Admin-Token": ADMIN_TOKEN}
-
+# The `admin` fixture lives in conftest.py — `GET /traces/{id}` is
+# operator-only, since it returns a contributor's raw timestamped ride.
 
 # A short trace through central Harare.
 SAMPLE_POINTS = [

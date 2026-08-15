@@ -5,6 +5,7 @@ check here is meant to happen *before* the database is touched, so a test that
 needed one would be testing the wrong thing.
 """
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -82,6 +83,31 @@ def test_raw_trace_admits_the_right_token(monkeypatch):
 def test_public_endpoints_need_no_token():
     """The aggregates are the product; only the raw traces are restricted."""
     assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("get", "/traces/1", None),
+        ("patch", "/routes/1", {"short_name": "A"}),
+        ("patch", "/stops/1", {"name": "Copacabana"}),
+    ],
+)
+def test_every_operator_endpoint_is_guarded(monkeypatch, method, path, body):
+    """One test per protected endpoint, so adding one without a token is noticed."""
+    monkeypatch.setattr(settings, "admin_token", "s3cret")
+
+    resp = getattr(client, method)(path, json=body) if body else getattr(client, method)(path)
+
+    assert resp.status_code == 401
+
+
+def test_naming_is_refused_when_no_token_is_configured(monkeypatch):
+    monkeypatch.setattr(settings, "admin_token", "")
+
+    resp = client.patch("/routes/1", json={"short_name": "A"})
+
+    assert resp.status_code == 503
 
 
 # --------------------------------------------------------------------------
