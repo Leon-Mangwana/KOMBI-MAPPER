@@ -28,6 +28,19 @@
   # obviously point at the Node version.
   NODE_VERSION = "22"
 
+  # The basemap ships with the site: web/public/harare.pmtiles is 5.9 MB, small
+  # enough that hosting it on the same origin beats standing up a bucket, and it
+  # sidesteps CORS entirely. Set in the repository rather than the dashboard
+  # because neither value is a secret and a deploy should be reproducible from
+  # a checkout. See ../infra/README.md#basemap-tiles.
+  VITE_PMTILES_URL = "/harare.pmtiles"
+  VITE_GLYPHS_URL = "/fonts/{fontstack}/{range}.pbf"
+
+  # The GTFS feed is served from this origin too, because the API and the
+  # pipeline run on different machines and the API has no copy of the file.
+  # Publishing a feed means exporting into web/public/ and deploying.
+  VITE_GTFS_URL = "/gtfs.zip"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -19,6 +19,12 @@
   # obviously point at the Node version.
   NODE_VERSION = "22"
 
+  # Basemap and feed are served from this site's own origin — see the root
+  # netlify.toml for why these live in the repository rather than the dashboard.
+  VITE_PMTILES_URL = "/harare.pmtiles"
+  VITE_GLYPHS_URL = "/fonts/{fontstack}/{range}.pbf"
+  VITE_GTFS_URL = "/gtfs.zip"
+
 # The app is a single page with no router, so this only matters for typos and
 # refreshes on a path — but without it those return Netlify's 404 instead of
 # the app.
