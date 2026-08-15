@@ -13,6 +13,9 @@ import {
   fetchRoute,
   fetchRoutes,
   fetchStops,
+  patchRoute,
+  patchStop,
+  type RouteNames,
   type RouteCollection,
   type RouteFeature,
   type RouteProperties,
@@ -143,6 +146,58 @@ export const useNetworkStore = defineStore('network', () => {
     void select(null)
   }
 
+  /**
+   * Rename a route, and fold the server's answer back into what is on screen.
+   *
+   * The response is the updated feature, so the list, the map and the cached
+   * detail are all refreshed from one authoritative copy rather than from what
+   * the form happened to send — which matters because the API trims names and
+   * turns a blank one into `null`.
+   */
+  async function renameRoute(routeId: number, names: RouteNames, token: string): Promise<void> {
+    const updated = await patchRoute(routeId, names, token)
+
+    routes.value = routes.value.map((feature) =>
+      feature.properties.id === routeId
+        ? // The list response carries no `stops`; keep it that way so the two
+          // shapes stay distinguishable.
+          { ...feature, properties: { ...updated.properties, stops: undefined } }
+        : feature,
+    )
+
+    detailCache.set(routeId, updated)
+    if (selectedId.value === routeId) detail.value = updated
+  }
+
+  /** Rename a stop, updating both the stops layer and the open route's list. */
+  async function renameStop(stopId: number, name: string | null, token: string): Promise<void> {
+    const updated = await patchStop(stopId, name, token)
+    const applied = updated.properties.name
+
+    stops.value = stops.value.map((feature) =>
+      feature.properties.id === stopId
+        ? { ...feature, properties: { ...feature.properties, name: applied } }
+        : feature,
+    )
+
+    // The open route embeds its own copy of each stop, so it needs the new name
+    // too — otherwise the panel keeps showing the old one until reselection.
+    for (const [routeId, feature] of detailCache) {
+      const embedded = feature.properties.stops
+      if (!embedded?.some((stop) => stop.id === stopId)) continue
+
+      const patched: RouteFeature = {
+        ...feature,
+        properties: {
+          ...feature.properties,
+          stops: embedded.map((stop) => (stop.id === stopId ? { ...stop, name: applied } : stop)),
+        },
+      }
+      detailCache.set(routeId, patched)
+      if (selectedId.value === routeId) detail.value = patched
+    }
+  }
+
   return {
     routes,
     stops,
@@ -162,6 +217,8 @@ export const useNetworkStore = defineStore('network', () => {
     load,
     select,
     clearSelection,
+    renameRoute,
+    renameStop,
   }
 })
 

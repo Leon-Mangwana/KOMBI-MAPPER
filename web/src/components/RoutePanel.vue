@@ -1,12 +1,73 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { formatLength, plural, routeName, stopName } from '@/lib/format'
+import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
 
 const store = useNetworkStore()
+const admin = useAdminStore()
 
 const query = ref('')
+
+// --- Naming ---------------------------------------------------------------
+// Only reachable in operator mode; see stores/admin.ts.
+
+const shortName = ref('')
+const longName = ref('')
+const saving = ref(false)
+const saveError = ref<string | null>(null)
+const saved = ref(false)
+
+/** Reload the form whenever the selection changes, so it never edits a stale route. */
+watch(
+  () => store.selectedRoute,
+  (route) => {
+    shortName.value = route?.short_name ?? ''
+    longName.value = route?.long_name ?? ''
+    saveError.value = null
+    saved.value = false
+  },
+  { immediate: true },
+)
+
+async function saveNames(): Promise<void> {
+  const route = store.selectedRoute
+  if (!route) return
+
+  saving.value = true
+  saveError.value = null
+  try {
+    // Blank means "clear it". The API trims and normalises, and the store
+    // takes its answer rather than what was typed.
+    await store.renameRoute(
+      route.id,
+      { short_name: shortName.value.trim() || null, long_name: longName.value.trim() || null },
+      admin.token,
+    )
+    saved.value = true
+  } catch (error) {
+    saveError.value = describe(error)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveStopName(stopId: number, value: string): Promise<void> {
+  saveError.value = null
+  try {
+    await store.renameStop(stopId, value.trim() || null, admin.token)
+  } catch (error) {
+    saveError.value = describe(error)
+  }
+}
+
+function describe(error: unknown): string {
+  const status = (error as { status?: number | null })?.status
+  if (status === 401) return 'That admin token was rejected.'
+  if (status === 503) return 'Naming is disabled on the server (no ADMIN_TOKEN set).'
+  return error instanceof Error ? error.message : 'Could not save.'
+}
 
 /**
  * Filter on the name a visitor can actually see — including the `Route 12`
@@ -41,12 +102,44 @@ const matches = computed(() => {
           most typical of them, not an official route.
         </p>
 
+        <form v-if="admin.active" class="naming" @submit.prevent="saveNames">
+          <label class="naming__label">
+            Short name
+            <input v-model="shortName" class="naming__input" placeholder="e.g. 4" maxlength="255" />
+          </label>
+          <label class="naming__label">
+            Long name
+            <input
+              v-model="longName"
+              class="naming__input"
+              placeholder="e.g. CBD - Mbare"
+              maxlength="255"
+            />
+          </label>
+          <button type="submit" class="naming__save" :disabled="saving">
+            {{ saving ? 'Saving…' : 'Save names' }}
+          </button>
+          <p v-if="saveError" class="naming__error" role="alert">{{ saveError }}</p>
+          <p v-else-if="saved" class="naming__ok" role="status">Saved.</p>
+        </form>
+
         <p v-if="store.detailLoading" class="panel__hint">Loading stops…</p>
 
         <ol v-else-if="store.selectedStops.length" class="stops">
           <li v-for="(stop, index) in store.selectedStops" :key="stop.id" class="stops__item">
             <span class="stops__seq">{{ index + 1 }}</span>
-            <span class="stops__name">{{ stopName(stop.name, index) }}</span>
+
+            <!-- Named in place: an operator is looking at the map to work out
+                 which kerb this is, so the edit belongs next to it. -->
+            <input
+              v-if="admin.active"
+              class="stops__input"
+              :value="stop.name ?? ''"
+              :placeholder="stopName(null, index)"
+              maxlength="255"
+              @change="saveStopName(stop.id, ($event.target as HTMLInputElement).value)"
+            />
+            <span v-else class="stops__name">{{ stopName(stop.name, index) }}</span>
           </li>
         </ol>
 
@@ -242,6 +335,71 @@ const matches = computed(() => {
 /* The line down the left reads as the route the stops sit on. */
 .stops__item + .stops__item {
   border-top: 1px solid var(--line);
+}
+
+.naming {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.5rem 0 1.25rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--bg);
+}
+
+.naming__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.naming__input,
+.stops__input {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.87rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.naming__save {
+  align-self: flex-start;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.naming__save:disabled {
+  opacity: 0.6;
+}
+
+.naming__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.78rem;
+}
+
+.naming__ok {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.stops__input {
+  flex: 1;
 }
 
 .stops__seq {

@@ -56,6 +56,9 @@ Interactive docs at http://localhost:8000/docs.
   in `properties.stops`.
 - `GET /stops` — every stop as a `FeatureCollection`, each carrying the
   `route_ids` that serve it.
+- `PATCH /routes/{id}` — **operator-only.** Set or clear `short_name` /
+  `long_name`. An omitted field is left alone; an explicit `null` clears it.
+- `PATCH /stops/{id}` — **operator-only.** Set or clear `name`.
 - `GET /gtfs.zip` — the exported GTFS feed. See below.
 
 The network endpoints answer with GeoJSON because that is what MapLibre takes as
@@ -146,6 +149,26 @@ curl -H "X-Admin-Token: $ADMIN_TOKEN" http://localhost:8000/traces/1
 Failing closed is the point: a deployment that forgot to set it would otherwise
 publish exactly the data the token exists to protect. Generate one with
 `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+### Naming is operator-only
+
+`short_name`, `long_name` and `stops.name` are the only columns in these tables
+a machine cannot produce — clustering has no idea a corridor is the Mbare route
+— and they are what makes the map and the GTFS feed legible to a passenger. They
+take the same `X-Admin-Token`:
+
+```bash
+curl -X PATCH http://localhost:8000/routes/1 \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"short_name": "4", "long_name": "CBD - Mbare"}'
+```
+
+Names survive re-clustering: `pipeline/naming.py` matches each new cluster to
+the named row it replaces and carries the name over. See
+[`../pipeline/README.md`](../pipeline/README.md#naming).
+
+The web app has a naming UI behind `#admin` — see
+[`../web/README.md`](../web/README.md#operator-mode).
 
 ### Uploads are open, but bounded
 

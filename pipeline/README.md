@@ -29,6 +29,7 @@ backend at `OSRM_URL` (default `http://localhost:5000`) — see
 | `process.py`   | The batch job: walk the `traces` table through the above |
 | `frechet.py`   | Discrete Fréchet distance between two polylines        |
 | `cluster.py`   | Cluster traces into routes and dwells into stops       |
+| `naming.py`    | Carry route and stop names across a re-clustering run  |
 | `gtfs.py`      | Export the clustered network as a zipped GTFS feed     |
 | `synthetic.py` | Generate traces with known ground truth, for tests     |
 | `seed_demo.py` | Upload synthetic traces, to exercise the system end to end |
@@ -270,6 +271,39 @@ clustered trace gets its `route_id` set. They are derived tables, so a rerun
 normally wants `--replace` — but that is not the default, because it deletes the
 `routes.short_name` and `stops.name` values that are exactly what this stage
 cannot fill in and what somebody will have edited by hand.
+
+### Naming
+
+Clustering cannot name anything — a cluster of GPS traces has no idea it is the
+Mbare route — so `routes.short_name`, `routes.long_name` and `stops.name` are
+filled in by a person, through `PATCH /routes/{id}` or the web app's operator
+mode. That makes them the most expensive data in the system: the only part
+nobody can recompute.
+
+Re-clustering used to destroy it. `--replace` deletes the derived tables and
+rebuilds them, which is right for geometry and wrong for names; running without
+`--replace` adds a second set of routes beside the first. The operator's choice
+was duplicates or amnesia.
+
+`naming.py` is the third option. Before the delete, it reads every named row and
+matches it against the new clustering:
+
+- **Routes** by discrete Fréchet distance, on geometries resampled exactly as
+  `cluster_routes` resamples them, with `ROUTE_EPS_M` as the threshold — the
+  same measure that decided two traces were one route decides a new route is the
+  old one. A corridor that is still the same corridor moves by metres. One that
+  has genuinely changed exceeds the threshold and arrives unnamed, which is
+  correct: somebody should look at it.
+- **Stops** by plain distance between centroids, within `STOP_EPS_M`.
+
+Matching is direction-sensitive, deliberately: inbound and outbound along one
+road are separate routes with separate names, and matching a reversed geometry
+would hand each the other's. It is also one-to-one — two new routes resembling
+one old name cannot both claim it, so the closer takes it and the other is left
+for review. Names that match nothing are logged as a warning, because a name
+with no home means a route has changed shape or stopped being detected.
+
+`--forget-names` opts out and rebuilds the names away.
 
 ### GTFS export
 

@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import MapView from '@/components/MapView.vue'
 import RoutePanel from '@/components/RoutePanel.vue'
 import { gtfsUrl } from '@/lib/api'
+import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
 
 const store = useNetworkStore()
+const admin = useAdminStore()
+
+const tokenEntry = ref('')
 
 onMounted(() => {
   void store.load()
+  admin.watchHash()
 })
+
+function signIn(): void {
+  admin.signIn(tokenEntry.value)
+  tokenEntry.value = ''
+}
 </script>
 
 <template>
@@ -24,6 +34,25 @@ onMounted(() => {
            download handling is better than anything this page would do. -->
       <a class="header__gtfs" :href="gtfsUrl" download>GTFS feed</a>
     </header>
+
+    <!-- Operator mode, reached with #admin in the URL. The API checks the
+         token on every write; hiding this only keeps the public map clean. -->
+    <div v-if="admin.available" class="banner banner--admin">
+      <template v-if="admin.active">
+        <span>Operator mode — route and stop names are editable.</span>
+        <button type="button" class="banner__retry" @click="admin.signOut()">Sign out</button>
+      </template>
+      <form v-else class="admin-form" @submit.prevent="signIn">
+        <input
+          v-model="tokenEntry"
+          type="password"
+          class="admin-form__input"
+          placeholder="Admin token"
+          aria-label="Admin token"
+        />
+        <button type="submit" class="banner__retry">Unlock naming</button>
+      </form>
+    </div>
 
     <p v-if="store.status === 'error'" class="banner banner--error" role="alert">
       {{ store.error }}
@@ -100,6 +129,27 @@ onMounted(() => {
   margin: 0;
   padding: 0.6rem 1rem;
   font-size: 0.85rem;
+}
+
+.banner--admin {
+  background: rgb(251 191 36 / 10%);
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-form__input {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.82rem;
 }
 
 .banner--error {
