@@ -179,38 +179,19 @@ and a route leaving the box would cross a hole in the map.
 roughly four times the size, and 15 mainly adds building footprints. Expect tens
 of megabytes at 14.
 
-### 2. Put it somewhere with ranges and CORS
+**It is 5.9 MB.** That number decides the rest of this section: an archive that
+size can simply live in the repository and be served from the site's own origin,
+which is why there is no bucket, no CDN and no CORS policy anywhere in this
+project. The current archive is committed at `web/public/harare.pmtiles`.
 
-**Cloudflare R2** is the usual home: 10 GB free, no egress charges, and range
-requests work out of the box.
+If you widen the box or raise the zoom far enough for that to stop being
+reasonable — a binary in git stays in the history forever — the usual home is
+Cloudflare R2: 10 GB free, no egress charges, range requests supported. You
+would then need a CORS policy on the bucket allowing `GET`/`HEAD` from the site
+origin, with `range` in `AllowedHeaders` and `content-range` in `ExposeHeaders`.
+Without the latter the client cannot interpret what it was given back.
 
-1. Create a bucket and upload `harare.pmtiles`.
-2. Attach a custom domain. The `r2.dev` public URL is rate-limited and
-   explicitly not for production use.
-3. Add a CORS policy, or the browser will refuse every range request:
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://your-site.netlify.app"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedHeaders": ["range", "if-match"],
-    "ExposeHeaders": ["etag", "content-range", "content-length"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-`ExposeHeaders` matters as much as the origin — without `content-range` the
-client cannot tell what it was given back.
-
-For a small extract you can instead drop the file in `web/public/` and let
-Netlify serve it from the site's own origin, which needs no CORS at all. The
-trade is that a binary in git stays in the history forever and grows the clone
-for everyone, so it is only reasonable for something in the low tens of
-megabytes that you will not re-cut often.
-
-### 3. Fonts, if you want labels
+### 2. Fonts, for labels
 
 Map labels need glyph files, and a style asking for text without them renders
 nothing while logging an error per tile. Self-host Protomaps' font assets rather
@@ -218,38 +199,58 @@ than hot-linking someone else's:
 
 ```bash
 git clone --depth 1 https://github.com/protomaps/basemaps-assets
-cp -r basemaps-assets/fonts ../web/public/fonts
 ```
 
-Then set `VITE_GLYPHS_URL=/fonts/{fontstack}/{range}.pbf`. The braces are part of
-the URL template — MapLibre fills them in.
+`web/public/fonts/` holds **only the Latin ranges** of Noto Sans Regular and
+Medium — `0-255.pbf` and `256-511.pbf`, about 410 KB in total. The full set of
+every Unicode range for both weights is 10 MB, which would be larger than the
+map. Shona and English are Latin script, so the trimmed set covers every label
+in the extract; a name needing a glyph outside those ranges silently fails to
+render, so copy the additional range files in if that ever comes up.
 
 Labels are worth having on the public map: "does this go to Highfield?" is the
 question it exists to answer, and suburb names are how a reader finds Highfield.
 The capture PWA deliberately stays label-free — it is a backdrop for a live
 position on a phone, where labels are clutter and extra download.
 
-### 4. Point the apps at it
+### 3. How the apps find it
 
-Set these in each Netlify site's environment variables and redeploy — Vite bakes
-them in at build time, so a redeploy is required, not a restart:
+Both values are set in [`../netlify.toml`](../netlify.toml), not in the Netlify
+dashboard: neither is a secret, and a deploy should be reproducible from a
+checkout.
 
 | Variable | Value |
 | -------- | ----- |
-| `VITE_PMTILES_URL` | `https://tiles.example.org/harare.pmtiles` |
-| `VITE_GLYPHS_URL` | `/fonts/{fontstack}/{range}.pbf` (web only) |
+| `VITE_PMTILES_URL` | `/harare.pmtiles` |
+| `VITE_GLYPHS_URL` | `/fonts/{fontstack}/{range}.pbf` |
 
-Locally, put the same lines in `web/.env` and `capture/.env`.
+The braces are part of the URL template — MapLibre fills them in. Locally, put
+the same lines in `web/.env`, or run against the built site.
 
-To verify: the map should show land, water and roads instead of flat dark blue.
-If it stays blank, the browser console will say which — a CORS rejection, a 404,
-or a 403 from a bucket that is not public.
+To verify: the map shows land, water, roads and suburb names instead of flat
+dark blue. If it stays blank, the browser console names the cause — a 404 on the
+archive, or a missing glyph range.
+
+### Verifying an extract without a browser
+
+The CLI can answer both questions the style depends on:
+
+```bash
+pmtiles show harare.pmtiles              # bounds, zoom range, tile count
+pmtiles show harare.pmtiles --metadata   # vector_layers: the layer names
+pmtiles tile harare.pmtiles 12 2401 2254 # one tile over central Harare
+```
+
+The layer names and `kind` values in `web/src/lib/basemap.ts` were checked
+against that output rather than against the schema documentation, which is worth
+repeating after a Protomaps major version — a renamed layer fails silently, by
+drawing nothing.
 
 ### Refreshing
 
-Re-run the extract against a newer build and replace the file. Nothing else
-changes; the URL stays the same and the apps need no redeploy. Worth doing after
-a mapping push in Harare, since new roads appear in OSM first.
+Re-run the extract against a newer build, replace `web/public/harare.pmtiles`,
+and deploy. Worth doing after a mapping push in Harare, since new roads reach
+OSM before they reach anything downstream.
 
 ## Database
 

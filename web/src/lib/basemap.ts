@@ -77,7 +77,15 @@ function labelLayers(): LayerSpecification[] {
       type: 'symbol',
       source: 'protomaps',
       'source-layer': 'places',
-      filter: ['in', ['get', 'kind'], ['literal', ['locality', 'neighbourhood', 'suburb']]],
+      // Verified against the Harare extract's own attributes rather than
+      // guessed from the schema docs: `pmtiles show --metadata` for the layer
+      // names, and a decoded z12 tile for the `kind` vocabulary. Country and
+      // region labels are excluded — "Zimbabwe" across a city map is noise.
+      filter: [
+        'in',
+        ['get', 'kind'],
+        ['literal', ['locality', 'macrohood', 'neighbourhood', 'suburb', 'quarter']],
+      ],
       layout: {
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Medium'],
