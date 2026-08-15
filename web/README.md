@@ -79,6 +79,28 @@ no idea it is the Mbare route. Until somebody names them by hand the app falls
 back to `Route 12` / `Stop 3`, and shows unnamed routes in a lighter weight so
 the named ones read as the reviewed half of the list.
 
+## Operator mode
+
+Route and stop names cannot be clustered — somebody who knows Harare has to
+supply them. Doing that for thirty routes through `curl` is how it does not get
+done, so the app has a naming UI:
+
+1. Open the site with `#admin` on the end of the URL.
+2. Paste the API's `ADMIN_TOKEN` and unlock.
+3. Select a route: its short and long name become editable, and each stop in the
+   list becomes an inline text box. Changes save on submit and on blur.
+
+Hiding the controls behind `#admin` is **not** the security boundary — the API
+checks the token on every write, and refuses without it. It keeps the public map
+free of affordances that would only ever reject a visitor.
+
+The token is kept in `sessionStorage`, so it is scoped to the tab and gone when
+it closes. That is a deliberate trade against `localStorage`: an operator retypes
+it once per session, and a borrowed machine does not keep write access alive.
+
+Names set here survive re-clustering — see
+[`../pipeline/README.md`](../pipeline/README.md#naming).
+
 ## Data shape
 
 Everything comes from three endpoints, all GeoJSON — the same shape MapLibre
