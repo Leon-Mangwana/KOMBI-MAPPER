@@ -690,6 +690,7 @@ def run(
     engine: Engine | None = None,
     *,
     replace_existing: bool = False,
+    carry_names: bool = True,
     persist: bool = True,
     tolerance_m: float = SIMPLIFY_TOLERANCE_M,
     step_m: float = RESAMPLE_STEP_M,
@@ -710,6 +711,8 @@ def run(
     Args:
         engine: Database engine. Defaults to the process-wide one.
         replace_existing: Clear the derived tables first. See `persist_network`.
+        carry_names: Re-apply existing route and stop names to the new
+            clustering. See `naming.carry_over`.
         persist: Set `False` for a dry run — cluster and report, write nothing.
         tolerance_m, step_m, route_eps_m, min_traces, stop_eps_m, min_support,
         max_offset_m: As `build_network`.
@@ -739,7 +742,12 @@ def run(
     logger.info("Clustered %s.", network.summary())
 
     if persist:
-        persist_network(network, engine=engine, replace_existing=replace_existing)
+        persist_network(
+            network,
+            engine=engine,
+            replace_existing=replace_existing,
+            carry_names=carry_names,
+        )
     return network
 
 
@@ -758,16 +766,16 @@ class Persisted:
 
 _INSERT_ROUTE_SQL = text(
     """
-    INSERT INTO routes (geom)
-    VALUES (ST_GeomFromText(:wkt, 4326))
+    INSERT INTO routes (short_name, long_name, geom)
+    VALUES (:short_name, :long_name, ST_GeomFromText(:wkt, 4326))
     RETURNING id
     """
 )
 
 _INSERT_STOP_SQL = text(
     """
-    INSERT INTO stops (geom)
-    VALUES (ST_GeomFromText(:wkt, 4326))
+    INSERT INTO stops (name, geom)
+    VALUES (:name, ST_GeomFromText(:wkt, 4326))
     RETURNING id
     """
 )
@@ -789,7 +797,11 @@ _ASSIGN_TRACES_SQL = text(
 
 
 def persist_network(
-    network: Network, engine: Engine | None = None, *, replace_existing: bool = False
+    network: Network,
+    engine: Engine | None = None,
+    *,
+    replace_existing: bool = False,
+    carry_names: bool = True,
 ) -> Persisted:
     """Write routes, stops and route_stops, and point each trace at its route.
 
@@ -801,20 +813,46 @@ def persist_network(
 
     **Re-running.** `routes`, `stops` and `route_stops` are derived tables, so a
     second run over more traces should normally *replace* what the first one
-    wrote rather than adding a parallel set of routes beside it. That is not the
-    default, because it deletes rows a human may have since named or corrected —
-    `routes.short_name` and `stops.name` are exactly the columns this stage
-    cannot fill in, and the ones somebody will have edited by hand. Pass
-    `replace_existing=True` when a clean rebuild is what you want; the deletes
-    cascade to `route_stops` and null out `traces.route_id`.
+    wrote rather than adding a parallel set of routes beside it. Pass
+    `replace_existing=True`; the deletes cascade to `route_stops` and null out
+    `traces.route_id`.
+
+    **Names survive that rebuild.** `routes.short_name`, `routes.long_name` and
+    `stops.name` are the columns this stage cannot fill in and a person has to,
+    so deleting them would throw away the only data in the system nobody can
+    recompute. Before the delete, each new cluster is matched to the named row
+    it evidently replaces and inherits its name — see `naming.carry_over`. Pass
+    `carry_names=False` to rebuild the names away deliberately.
+
+    Args:
+        network: The clustering to write.
+        engine: Database engine. Defaults to the process-wide one.
+        replace_existing: Clear the derived tables first.
+        carry_names: Re-apply existing names to the matching new clusters. Only
+            meaningful with `replace_existing`, since nothing is deleted
+            otherwise.
 
     Returns:
         The ids assigned, keyed by cluster label.
     """
     engine = engine if engine is not None else get_engine()
 
+    route_names: dict[int, tuple[str | None, str | None]] = {}
+    stop_names: dict[int, str] = {}
+
     with engine.begin() as conn:
         if replace_existing:
+            if carry_names:
+                # Inside the transaction and before the delete: these rows are
+                # about to stop existing, and a name not read now is lost.
+                #
+                # Imported here rather than at module scope because `naming`
+                # imports from this module, and at module scope that is a cycle.
+                from naming import carry_over
+
+                carried = carry_over(network, conn)
+                route_names, stop_names = carried.routes, carried.stops
+
             # `route_stops` cascades from both parents and `traces.route_id` is
             # ON DELETE SET NULL, so these two deletes are the whole rebuild.
             deleted_routes = conn.execute(text("DELETE FROM routes")).rowcount
@@ -828,14 +866,26 @@ def persist_network(
         stop_ids: dict[int, int] = {}
         for stop in network.stops:
             stop_ids[stop.label] = int(
-                conn.execute(_INSERT_STOP_SQL, {"wkt": _to_wgs84(stop.centroid).wkt}).scalar_one()
+                conn.execute(
+                    _INSERT_STOP_SQL,
+                    {
+                        "wkt": _to_wgs84(stop.centroid).wkt,
+                        "name": stop_names.get(stop.label),
+                    },
+                ).scalar_one()
             )
 
         route_ids: dict[int, int] = {}
         for route in network.routes:
+            short_name, long_name = route_names.get(route.label, (None, None))
             route_id = int(
                 conn.execute(
-                    _INSERT_ROUTE_SQL, {"wkt": _to_wgs84(route.canonical_geom).wkt}
+                    _INSERT_ROUTE_SQL,
+                    {
+                        "wkt": _to_wgs84(route.canonical_geom).wkt,
+                        "short_name": short_name,
+                        "long_name": long_name,
+                    },
                 ).scalar_one()
             )
             route_ids[route.label] = route_id
@@ -879,6 +929,11 @@ def main(argv: list[str] | None = None) -> int:
         help="cluster and report, but write nothing",
     )
     parser.add_argument(
+        "--forget-names",
+        action="store_true",
+        help="do not carry existing route and stop names onto the new clustering",
+    )
+    parser.add_argument(
         "--route-eps-m",
         type=float,
         default=ROUTE_EPS_M,
@@ -902,6 +957,7 @@ def main(argv: list[str] | None = None) -> int:
 
     network = run(
         replace_existing=args.replace,
+        carry_names=not args.forget_names,
         persist=not args.dry_run,
         route_eps_m=args.route_eps_m,
         stop_eps_m=args.stop_eps_m,

@@ -37,6 +37,7 @@ py-modules = [
     "match",
     "process",
     "cluster",
+    "naming",
     "frechet",
     "gtfs",
     "config",
