@@ -80,6 +80,50 @@ export async function fetchRoute(routeId: number, signal?: AbortSignal): Promise
   return await getJson<RouteFeature>(`/routes/${routeId}`, signal)
 }
 
+/** Names an operator can set on a route. Omit a field to leave it unchanged. */
+export interface RouteNames {
+  short_name?: string | null
+  long_name?: string | null
+}
+
+export async function patchRoute(
+  routeId: number,
+  names: RouteNames,
+  token: string,
+): Promise<RouteFeature> {
+  return await sendJson<RouteFeature>(`/routes/${routeId}`, names, token)
+}
+
+export async function patchStop(
+  stopId: number,
+  name: string | null,
+  token: string,
+): Promise<StopFeature> {
+  return await sendJson<StopFeature>(`/stops/${stopId}`, { name }, token)
+}
+
+async function sendJson<T>(path: string, body: unknown, token: string): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
+      body: JSON.stringify(body),
+    })
+  } catch (error) {
+    throw new ApiError(error instanceof Error ? error.message : 'Network error')
+  }
+
+  if (!response.ok) {
+    throw new ApiError(
+      (await readDetail(response)) ?? `Request failed (HTTP ${response.status})`,
+      response.status,
+    )
+  }
+
+  return (await response.json()) as T
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let response: Response
   try {
