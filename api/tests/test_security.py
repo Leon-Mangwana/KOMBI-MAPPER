@@ -45,6 +45,32 @@ def test_raw_trace_rejects_a_missing_token(monkeypatch):
     assert resp.headers["www-authenticate"] == "X-Admin-Token"
 
 
+@pytest.mark.parametrize(
+    ("configured", "supplied"),
+    [
+        ("s3cret\n", "s3cret"),  # pasted into a dashboard text box
+        ("  s3cret  ", "s3cret"),
+        ("s3cret", "s3cret\n"),  # copied out of a terminal
+        ("s3cret", " s3cret "),
+    ],
+)
+def test_surrounding_whitespace_does_not_break_the_token(monkeypatch, configured, supplied):
+    """A trailing newline in a hosting dashboard is invisible and looks like a
+    wrong token. Both sides are stripped so it cannot cost an afternoon."""
+    monkeypatch.setattr(settings, "admin_token", configured)
+
+    resp = client.patch("/routes/1", json={"short_name": "A"}, headers={"X-Admin-Token": supplied})
+
+    assert resp.status_code != 401, "the token should have been accepted"
+
+
+def test_a_whitespace_only_token_is_treated_as_unset(monkeypatch):
+    """Otherwise it would authenticate nothing while looking configured."""
+    monkeypatch.setattr(settings, "admin_token", "   \n")
+
+    assert client.get("/traces/1").status_code == 503
+
+
 def test_raw_trace_rejects_a_wrong_token(monkeypatch):
     monkeypatch.setattr(settings, "admin_token", "s3cret")
 

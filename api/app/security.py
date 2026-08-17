@@ -38,7 +38,16 @@ def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     The comparison is constant-time. The timing signal on a short shared secret
     is not much of an attack, but the fix costs one function call.
     """
-    if not settings.admin_token:
+    # Both sides are stripped. A token pasted into a hosting dashboard's text
+    # box arrives with a trailing newline surprisingly often, and the resulting
+    # failure is a plain 401 that looks exactly like a wrong token — there is
+    # nothing in the UI to see, because the whitespace is invisible. No security
+    # is given up: the entropy is in the token body, and nobody chooses a secret
+    # whose meaning depends on a leading space.
+    expected = settings.admin_token.strip()
+    supplied = x_admin_token.strip() if x_admin_token is not None else None
+
+    if not expected:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -47,7 +56,7 @@ def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
             ),
         )
 
-    if x_admin_token is None or not compare_digest(x_admin_token, settings.admin_token):
+    if supplied is None or not compare_digest(supplied, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="A valid X-Admin-Token header is required.",
