@@ -33,3 +33,12 @@ services:
       # that loads but shows "Could not reach the route server".
       - key: CORS_ORIGINS
         sync: false
+
+      # Shared secret for the operator-only endpoints: reading a raw trace, and
+      # naming routes and stops. Listed here so the blueprint prompts for it at
+      # creation rather than needing a second deploy to add it.
+      #
+      # Leaving it blank does not open those endpoints — it disables them (503).
+      # See api/app/security.py.
+      - key: ADMIN_TOKEN
+        sync: false
