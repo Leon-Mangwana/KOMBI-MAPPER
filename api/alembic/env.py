@@ -8,7 +8,16 @@ from app.config import settings
 from app.database import Base
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+# `%` is doubled because Alembic keeps its options in a ConfigParser, where a
+# lone `%` starts an interpolation token and raises before anything connects.
+#
+# This is not a hypothetical: a database password containing any character that
+# has to be percent-encoded in a URL — `@` becomes `%40`, `/` becomes `%2F` —
+# arrives here already encoded, and hosted Postgres providers generate exactly
+# such passwords. Doubling is the escape ConfigParser itself defines, and it is
+# undone before the value reaches SQLAlchemy.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
