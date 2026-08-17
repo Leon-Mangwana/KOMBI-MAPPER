@@ -41,6 +41,16 @@
   # Publishing a feed means exporting into web/public/ and deploying.
   VITE_GTFS_URL = "/gtfs.zip"
 
+  # The deployed API. Not a secret — it is a public URL the browser calls
+  # directly — so it belongs in the repository next to the rest of the build
+  # configuration rather than in the dashboard, where a redeploy from a fresh
+  # checkout would silently lose it.
+  #
+  # Vite inlines this at build time, so changing it needs a rebuild, not a
+  # restart. The API must also name this site in its CORS_ORIGINS, or the
+  # browser blocks every request and the map reports the server as unreachable.
+  VITE_API_BASE_URL = "https://kombi-api.onrender.com"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
