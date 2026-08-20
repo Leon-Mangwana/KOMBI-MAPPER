@@ -47,6 +47,63 @@ def test_web_map_origin_is_allowed():
     assert resp.headers["access-control-allow-origin"] == WEB_ORIGIN
 
 
+def test_preflight_for_operator_rename_is_allowed():
+    """The exact preflight operator mode's PATCH triggers.
+
+    Both halves matter and each fails on its own: PATCH is not a simple method,
+    and X-Admin-Token is not a CORS-safelisted header, so a response naming only
+    one of them still leaves the browser refusing the request. Shipping without
+    this test is how operator mode reached production renaming nothing — the
+    upload preflight above passed throughout, because POST and Content-Type were
+    already allowed for the capture PWA.
+    """
+    resp = client.options(
+        "/routes/1",
+        headers={
+            "Origin": WEB_ORIGIN,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "content-type,x-admin-token",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == WEB_ORIGIN
+    assert "PATCH" in resp.headers["access-control-allow-methods"]
+
+    allowed = resp.headers["access-control-allow-headers"].lower()
+    assert "content-type" in allowed
+    assert "x-admin-token" in allowed
+
+
+def test_preflight_for_stop_rename_is_allowed():
+    """Operator mode renames stops through a second endpoint, on the same terms."""
+    resp = client.options(
+        "/stops/1",
+        headers={
+            "Origin": WEB_ORIGIN,
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "content-type,x-admin-token",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert "PATCH" in resp.headers["access-control-allow-methods"]
+
+
+def test_preflight_does_not_allow_unused_write_methods():
+    """Nothing in either front end deletes, so the preflight should refuse it."""
+    resp = client.options(
+        "/routes/1",
+        headers={
+            "Origin": WEB_ORIGIN,
+            "Access-Control-Request-Method": "DELETE",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "DELETE" not in resp.headers.get("access-control-allow-methods", "")
+
+
 def test_unknown_origin_gets_no_cors_header():
     resp = client.get("/health", headers={"Origin": "https://evil.example"})
 

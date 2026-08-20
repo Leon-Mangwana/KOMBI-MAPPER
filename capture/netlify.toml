@@ -19,6 +19,21 @@
   # obviously point at the Node version.
   NODE_VERSION = "22"
 
+  # The deployed API that traces are uploaded to. Not a secret — it is a public
+  # URL the browser posts to directly — so it belongs in the repository next to
+  # the rest of the build configuration, as it does for the public map in
+  # ../web/netlify.toml.
+  #
+  # Without it `lib/api.ts` falls back to http://localhost:8000 and bakes that
+  # into the bundle, which on a deployed HTTPS site is both wrong and blocked
+  # outright as mixed content. The upload then fails into the retry queue, so
+  # the PWA looks like it is working while nothing ever lands.
+  #
+  # Vite inlines this at build time, so changing it needs a rebuild, not a
+  # restart. This site's own origin must also appear in the API's CORS_ORIGINS,
+  # or the browser blocks every upload before it is sent.
+  VITE_API_BASE_URL = "https://kombi-api.onrender.com"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
