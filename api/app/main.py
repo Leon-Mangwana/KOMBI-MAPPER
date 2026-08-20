@@ -7,15 +7,25 @@ from .security import IngestGuardMiddleware
 
 app = FastAPI(title="Kombi Route Mapper API", version="0.1.0")
 
-# The capture PWA is served from its own origin, so trace uploads are
-# cross-origin. No cookies or auth headers are involved — the browser only
-# needs the preflight to pass — so credentials stay off.
+# Both front ends are served from their own origins, so every call they make is
+# cross-origin and has to survive a preflight.
+#
+# PATCH and X-Admin-Token are here for the web map's operator mode, which renames
+# routes and stops. Both are needed: PATCH is not a simple method, and a request
+# carrying a header outside the CORS-safelisted set is not a simple request, so
+# the browser preflights and refuses unless the response names each of them. A
+# 400 on that preflight is what an operator sees as a rename that silently does
+# nothing.
+#
+# Credentials stay off regardless. The operator token travels in its own header,
+# not a cookie, so `allow_credentials` buys nothing and would force the stricter
+# rules that come with it (no wildcard origin, `Vary: Origin` handling).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Admin-Token"],
 )
 
 # Registered after CORS so that a rejected upload still carries the headers the
