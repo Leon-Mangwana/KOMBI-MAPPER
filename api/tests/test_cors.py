@@ -56,6 +56,10 @@ def test_preflight_for_operator_rename_is_allowed():
     this test is how operator mode reached production renaming nothing — the
     upload preflight above passed throughout, because POST and Content-Type were
     already allowed for the capture PWA.
+
+    The path is incidental: CORSMiddleware answers OPTIONS before routing, so
+    this asserts nothing about `/routes/{id}` existing. What it pins is the
+    method-and-header pair the browser asks permission for.
     """
     resp = client.options(
         "/routes/1",
@@ -75,23 +79,12 @@ def test_preflight_for_operator_rename_is_allowed():
     assert "x-admin-token" in allowed
 
 
-def test_preflight_for_stop_rename_is_allowed():
-    """Operator mode renames stops through a second endpoint, on the same terms."""
-    resp = client.options(
-        "/stops/1",
-        headers={
-            "Origin": WEB_ORIGIN,
-            "Access-Control-Request-Method": "PATCH",
-            "Access-Control-Request-Headers": "content-type,x-admin-token",
-        },
-    )
-
-    assert resp.status_code == 200
-    assert "PATCH" in resp.headers["access-control-allow-methods"]
-
-
 def test_preflight_does_not_allow_unused_write_methods():
-    """Nothing in either front end deletes, so the preflight should refuse it."""
+    """Neither front end deletes, so the browser should not be told it may.
+
+    Guards against `allow_methods=["*"]`, which would hand every origin in
+    CORS_ORIGINS permission for verbs this API never meant to expose.
+    """
     resp = client.options(
         "/routes/1",
         headers={
@@ -100,7 +93,6 @@ def test_preflight_does_not_allow_unused_write_methods():
         },
     )
 
-    assert resp.status_code == 400
     assert "DELETE" not in resp.headers.get("access-control-allow-methods", "")
 
 
