@@ -4,8 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "basemap": "node scripts/copy-basemap.mjs",
+    "predev": "npm run basemap",
     "dev": "vite",
+    "predev:lan": "npm run basemap",
     "dev:lan": "vite --host",
+    "prebuild": "npm run basemap",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit"
