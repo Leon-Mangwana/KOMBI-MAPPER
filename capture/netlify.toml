@@ -34,6 +34,13 @@
   # or the browser blocks every upload before it is sent.
   VITE_API_BASE_URL = "https://kombi-api.onrender.com"
 
+  # The basemap is served from this site's own origin, like the public map's.
+  # `npm run build` first copies ../web/public/harare.pmtiles into public/
+  # (scripts/copy-basemap.mjs), so the one committed archive serves both
+  # sites. Without this the deployed PWA draws the position dot on a blank
+  # background.
+  VITE_PMTILES_URL = "/harare.pmtiles"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
