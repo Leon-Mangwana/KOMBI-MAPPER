@@ -124,7 +124,9 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:4173,http://localhost:5174,h
 
 Testing capture on a phone through a tunnel means adding that URL too, e.g.
 `https://something.trycloudflare.com`. Credentials are not allowed — no request
-carries cookies or auth headers.
+carries cookies. The operator-only endpoints authenticate with a plain
+`X-Admin-Token` header instead, which is why that header and `PATCH` are in the
+allow-lists in `app/main.py`; see [Security](#security).
 
 ## Security
 
