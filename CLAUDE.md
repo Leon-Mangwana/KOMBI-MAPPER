@@ -58,7 +58,7 @@ Bring up the infrastructure (Postgres + PostGIS, OSRM):
 
 ```bash
 cd infra
-docker compose up -d
+docker compose up -d postgis   # OSRM needs a prepared dataset first: ./build-osrm.sh
 ```
 
 Each app directory owns its own tooling and README. See the per-directory
