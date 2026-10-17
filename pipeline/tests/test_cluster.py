@@ -703,3 +703,48 @@ class TestBuildNetwork:
         assert len(result.routes) == 1
         assert result.stops == ()
         assert result.routes[0].stop_labels == ()
+
+
+# --------------------------------------------------------------------------
+# Dwell collection
+# --------------------------------------------------------------------------
+
+
+def test_collect_dwells_skips_a_trace_cleaning_rejects(monkeypatch, caplog):
+    """One upload with broken timestamps must not cost the whole network its stops.
+
+    `process.py` would have rejected such a trace, but a `matched_geom` can
+    arrive by other routes (`seed_demo.py --fake-match`), and clustering
+    re-cleans from the raw points regardless.
+    """
+    import logging
+
+    import cluster
+
+    monkeypatch.setattr(cluster, "load_trace", lambda trace_id, engine=None: trace_id)
+
+    def clean(trace_id):
+        if trace_id == 2:
+            raise ValueError("Trace has points with no timestamp; cannot derive speeds.")
+        return trace_id
+
+    monkeypatch.setattr(cluster, "clean_trace", clean)
+    monkeypatch.setattr(
+        cluster,
+        "detect_dwells",
+        lambda cleaned, **kwargs: [
+            cluster.Dwell(
+                centroid=Point(float(cleaned), 0.0),
+                start_time=DEFAULT_START,
+                duration_s=60.0,
+                start_index=0,
+                end_index=1,
+            )
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        dwells = cluster.collect_dwells([1, 2, 3], engine=object())
+
+    assert list(dwells["trace_id"]) == [1, 3]
+    assert "Trace 2 skipped" in caplog.text

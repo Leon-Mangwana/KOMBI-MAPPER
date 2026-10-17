@@ -410,7 +410,7 @@ def run(
 def run_all(
     engine: Engine | None = None,
     *,
-    replace_existing: bool = False,
+    recluster: bool = False,
     **run_kwargs: Any,
 ) -> ProcessReport:
     """Match everything pending, then re-cluster and re-export the feed.
@@ -419,9 +419,17 @@ def run_all(
     Clustering is global — it looks at every matched trace, not just this
     batch's — so it runs once at the end rather than per trace.
 
+    The new clustering always *replaces* the previous one. `routes`, `stops`
+    and `route_stops` are derived tables, and appending a second network beside
+    the first is never what a repeated run wants; hand-entered names survive
+    the rebuild through `naming.carry_over`. Appending was the old default,
+    from before names were carried over, and every scheduled run that forgot
+    `--replace` doubled the map.
+
     Clustering and export are skipped when the run matched nothing new *and*
-    was not asked to rebuild, since re-clustering identical inputs would spend
-    minutes to write the same routes back.
+    `recluster` is false, since re-clustering identical inputs would spend
+    minutes to write the same routes back. Pass `recluster=True` after tuning
+    a clustering threshold, when the inputs are the same but the answer is not.
 
     `cluster` and `gtfs` are imported here rather than at module scope: they
     pull in scikit-learn and the feed builder, and the common case — matching a
@@ -430,7 +438,7 @@ def run_all(
     engine = engine if engine is not None else get_engine()
     report = run(engine, **run_kwargs)
 
-    if not report.matched_ids and not replace_existing:
+    if not report.matched_ids and not recluster:
         logger.info("Nothing newly matched; leaving the existing routes and feed alone.")
         return report
 
@@ -444,7 +452,7 @@ def run_all(
     import cluster
     import gtfs
 
-    network = cluster.run(engine=engine, replace_existing=replace_existing)
+    network = cluster.run(engine=engine, replace_existing=True)
     logger.info("Clustered %s.", network.summary())
 
     try:
@@ -503,16 +511,21 @@ def main(argv: list[str] | None = None) -> int:
         help="after matching, re-cluster the network and re-export the GTFS feed",
     )
     parser.add_argument(
+        "--recluster",
+        # `--replace` is the old name, kept so existing cron lines keep working.
+        # --full has always rebuilt the network since names became carried
+        # over, so the flag now only forces a rebuild when nothing new matched.
         "--replace",
         action="store_true",
-        help="with --full, rebuild the routes and stops from scratch (see cluster.persist_network)",
+        dest="recluster",
+        help="with --full, re-cluster and re-export even if nothing new matched",
     )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    if args.replace and not args.full:
-        parser.error("--replace only means anything with --full")
+    if args.recluster and not args.full:
+        parser.error("--recluster only means anything with --full")
     if args.dry_run and args.full:
         parser.error("--dry-run writes nothing, so there is nothing for --full to cluster")
 
@@ -526,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     if args.full:
-        report = run_all(replace_existing=args.replace, **options)
+        report = run_all(recluster=args.recluster, **options)
     else:
         report = run(**options)
 

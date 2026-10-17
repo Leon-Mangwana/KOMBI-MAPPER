@@ -310,8 +310,13 @@ def collect_dwells(
     for trace_id in (int(value) for value in trace_ids):
         try:
             cleaned = clean_trace(load_trace(trace_id, engine=engine))
-        except LookupError:
-            logger.warning("Trace %d has no points; skipping it for stop detection.", trace_id)
+        except (LookupError, ValueError) as error:
+            # `LookupError`: no points. `ValueError`: `clean_trace` could not
+            # derive speeds — no timestamps, or too few fixes left after the
+            # accuracy gates. `process.py` rejects such traces, but one can
+            # still carry a `matched_geom` (seeded with `--fake-match`, say),
+            # and one bad upload must not cost the whole network its stops.
+            logger.warning("Trace %d skipped for stop detection: %s", trace_id, error)
             continue
 
         found = detect_dwells(cleaned, **dwell_kwargs)  # type: ignore[arg-type]

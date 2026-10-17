@@ -13,12 +13,21 @@ docker compose up -d postgis     # works on a clean checkout
 ```
 
 `osrm` will **not** start on a clean checkout — `osrm-routed` needs a prepared
-road network, and preparing one is a one-off manual step. Do that next.
+road network, and preparing one is a one-off step. Do that next:
+
+```bash
+./build-osrm.sh --up             # download the extract, prepare it, start osrm
+```
+
+That script is the whole of the next section in one command. Read on for what
+it does and why, or skip to [Verifying](#verifying).
 
 ## Preparing the OSRM dataset
 
 Three commands turn an OSM extract into something `osrm-routed` can serve. They
 are run once (and again whenever you refresh the extract), not on every boot.
+[`build-osrm.sh`](build-osrm.sh) runs them in order; the steps are spelled out
+here so a failure in the middle is recognisable.
 
 Everything below runs through `docker compose run`, so the preparation uses the
 exact image pinned in [`docker-compose.yml`](docker-compose.yml) and writes into
@@ -117,7 +126,8 @@ The pipeline reaches OSRM at `http://localhost:5000` by default; override with
 
 Geofabrik rebuilds nightly. To pick up new roads, re-download and re-run all
 three preparation steps — `osrm-partition` and `osrm-customize` alone are not
-enough, because the graph itself changed:
+enough, because the graph itself changed. `./build-osrm.sh --refresh --up` does
+exactly this; by hand it is:
 
 ```bash
 docker compose stop osrm

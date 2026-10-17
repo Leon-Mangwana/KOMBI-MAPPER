@@ -12,12 +12,14 @@ Stack: NumPy · GeoPandas · Shapely · scikit-learn · SQLAlchemy · httpx (OSR
 cd pipeline
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+cp .env.example .env
 ```
 
 The database URL defaults to the same one the API uses; override with
-`DATABASE_URL` in the environment or a `.env` file. Map matching needs an OSRM
-backend at `OSRM_URL` (default `http://localhost:5000`) — see
-[`../infra/README.md`](../infra/README.md) for preparing and running one.
+`DATABASE_URL` in `.env` (every setting is documented in
+[`.env.example`](.env.example)). Map matching needs an OSRM backend at
+`OSRM_URL` (default `http://localhost:5000`) — `../infra/build-osrm.sh` prepares
+and starts one; see [`../infra/README.md`](../infra/README.md).
 
 ## Modules
 
@@ -76,7 +78,7 @@ In practice none of that is run by hand — `process.py` is the job that does it
 
 ```bash
 python process.py             # match every trace uploaded since the last run
-python process.py --full      # ...then re-cluster and re-export the feed
+python process.py --full      # ...then rebuild the network and re-export the feed
 ```
 
 ### Processing
@@ -91,7 +93,8 @@ python process.py --limit 5           # a cautious first batch
 python process.py --trace 42          # one trace, whatever its status
 python process.py --retry             # include traces an earlier run rejected
 python process.py --all               # every trace in the table
-python process.py --full --replace    # match, then rebuild the whole network
+python process.py --full              # match, then rebuild the whole network
+python process.py --full --recluster  # rebuild even if nothing new matched
 ```
 
 **Statuses.** The API writes `uploaded`; this stage writes one of three terminal
@@ -131,7 +134,32 @@ built from an arbitrary prefix of the backlog is worse than yesterday's.
 **`--full`** runs clustering and the GTFS export after matching. Clustering is
 global, so it runs once at the end rather than per trace, and it is skipped
 entirely when the run matched nothing new — re-clustering identical inputs would
-spend minutes writing the same routes back.
+spend minutes writing the same routes back. `--recluster` overrides that skip,
+for after a threshold has been tuned. The new network always *replaces* the old
+one; names survive through [naming](#naming). (`--replace` is accepted as the
+old spelling of `--recluster`, so existing cron lines keep working.)
+
+**Running it on a schedule.** Nothing triggers this stage: the API only stores
+uploads, and the deployed API has no OSRM to call. The pipeline runs on an
+operator's machine, where OSRM and this checkout are, so the schedule lives
+there too. `process.py --full` is idempotent — nothing new means nothing
+rewritten, and a run that OSRM interrupts leaves the backlog `uploaded` for the
+next one — so it is safe to run as often as you like. Nightly is plenty:
+
+```bash
+# cron (Linux/macOS): 02:00 daily, with OSRM up
+0 2 * * * cd /path/to/pipeline && .venv/bin/python process.py --full >> process.log 2>&1
+```
+
+```powershell
+# Windows Task Scheduler: a daily task running this action
+schtasks /Create /SC DAILY /ST 02:00 /TN "Kombi pipeline" `
+  /TR "cmd /c cd /d C:\path\to\pipeline && .venv\Scripts\python.exe process.py --full >> process.log 2>&1"
+```
+
+When the API is deployed apart from the pipeline, the exported feed still has
+to reach it — see [GTFS export](#gtfs-export) for the `web/public/gtfs.zip`
+hand-off, which a scheduled run cannot do for you.
 
 ### Cleaning
 
@@ -268,9 +296,11 @@ chaining nearest neighbours, gets backwards.
 
 Routes, stops and `route_stops` are written in one transaction, and each
 clustered trace gets its `route_id` set. They are derived tables, so a rerun
-normally wants `--replace` — but that is not the default, because it deletes the
-`routes.short_name` and `stops.name` values that are exactly what this stage
-cannot fill in and what somebody will have edited by hand.
+replaces them: `process.py --full` always does, and `cluster.py` on its own
+wants `--replace` (without it a second network is written beside the first,
+which is only ever useful for comparing two clusterings side by side). The
+hand-entered `routes.short_name` and `stops.name` values survive the rebuild —
+see the next section.
 
 ### Naming
 
@@ -280,10 +310,10 @@ filled in by a person, through `PATCH /routes/{id}` or the web app's operator
 mode. That makes them the most expensive data in the system: the only part
 nobody can recompute.
 
-Re-clustering used to destroy it. `--replace` deletes the derived tables and
-rebuilds them, which is right for geometry and wrong for names; running without
-`--replace` adds a second set of routes beside the first. The operator's choice
-was duplicates or amnesia.
+Re-clustering used to destroy it. `--replace` deleted the derived tables and
+rebuilt them, which is right for geometry and wrong for names; running without
+it added a second set of routes beside the first. The operator's choice was
+duplicates or amnesia, and `process.py --full` defaulted to duplicates.
 
 `naming.py` is the third option. Before the delete, it reads every named row and
 matches it against the new clustering:

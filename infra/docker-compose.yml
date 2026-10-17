@@ -1,13 +1,15 @@
 # Local infrastructure for Kombi Route Mapper.
 #
 # Usage:
-#   docker compose up -d
+#   docker compose up -d postgis   # works on a clean checkout
+#   ./build-osrm.sh --up           # prepare the road network, then start osrm
 #
 # Postgres is exposed on localhost:5432 (user/pass: postgres/postgres).
 # Create a separate `kombi_test` database for running the API test suite.
 #
 # The `osrm` service needs a prepared dataset in ./data before it will start.
-# See README.md — it will not come up on a clean checkout.
+# `docker compose up -d` with no service name fails on a clean checkout for
+# that reason; build-osrm.sh does the preparation (see README.md).
 services:
   postgis:
     image: postgis/postgis:15-3.4
