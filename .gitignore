@@ -35,6 +35,9 @@ dist-ssr/
 capture/dev-dist/
 web/dev-dist/
 
+# Copied from web/public/ by capture/scripts/copy-basemap.mjs before dev/build
+capture/public/harare.pmtiles
+
 # ---- Environment & secrets ----
 .env
 .env.*
