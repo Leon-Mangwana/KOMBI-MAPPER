@@ -48,6 +48,13 @@ With neither set, the map falls back to a blank background. Your position and
 the live trace still render — enough to confirm recording works, just with no
 map underneath.
 
+The archive itself is not committed here. `npm run dev` and `npm run build`
+first run `scripts/copy-basemap.mjs`, which copies
+`../web/public/harare.pmtiles` into `public/` (gitignored), so one committed
+archive serves both front ends and `VITE_PMTILES_URL=/harare.pmtiles` works
+locally and on Netlify alike. Refreshing the map means replacing the copy in
+`web/public/` only.
+
 ## How recording works
 
 **Points are never buffered in memory.** A phone in a pocket for a 40-minute
