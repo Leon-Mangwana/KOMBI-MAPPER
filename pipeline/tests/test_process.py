@@ -429,7 +429,29 @@ def test_run_all_clusters_and_exports_after_a_good_run(monkeypatch, tmp_path):
     monkeypatch.setattr(cluster, "run", fake_cluster)
     monkeypatch.setattr(gtfs, "export", lambda engine=None: called.setdefault("feed", tmp_path))
 
-    process.run_all(ENGINE, replace_existing=True)
+    process.run_all(ENGINE)
+
+    assert called["replace"] is True, "a repeated run must replace the network, not append to it"
+    assert called["feed"] == tmp_path
+
+
+def test_run_all_reclusters_on_request_even_when_nothing_matched(monkeypatch, tmp_path):
+    """After a threshold change the inputs are the same but the clustering is not."""
+    import cluster
+    import gtfs
+
+    monkeypatch.setattr(process, "run", lambda engine=None, **kwargs: process.ProcessReport())
+
+    called: dict = {}
+
+    def fake_cluster(engine=None, replace_existing=False):
+        called["replace"] = replace_existing
+        return cluster.Network(routes=(), stops=())
+
+    monkeypatch.setattr(cluster, "run", fake_cluster)
+    monkeypatch.setattr(gtfs, "export", lambda engine=None: called.setdefault("feed", tmp_path))
+
+    process.run_all(ENGINE, recluster=True)
 
     assert called["replace"] is True
     assert called["feed"] == tmp_path
@@ -499,9 +521,24 @@ def test_main_routes_full_runs_through_run_all(monkeypatch):
     )
     monkeypatch.setattr(process, "run", lambda *a, **k: pytest.fail("should have used run_all"))
 
-    process.main(["--full", "--replace"])
+    process.main(["--full"])
 
-    assert seen["replace_existing"] is True
+    assert seen["recluster"] is False
+
+
+@pytest.mark.parametrize("flag", ["--recluster", "--replace"])
+def test_main_accepts_recluster_and_its_old_name(monkeypatch, flag):
+    """`--replace` is what every existing cron line says; it must keep working."""
+    seen: dict = {}
+    monkeypatch.setattr(
+        process,
+        "run_all",
+        lambda engine=None, **kwargs: seen.update(kwargs) or process.ProcessReport(),
+    )
+
+    process.main(["--full", flag])
+
+    assert seen["recluster"] is True
 
 
 def test_main_reports_a_non_zero_exit_when_the_run_aborted(monkeypatch, capsys):
@@ -530,7 +567,7 @@ def test_main_prints_the_traces_that_did_not_match(monkeypatch, capsys):
     assert "trace 1" not in printed, "a matched trace needs no line of its own"
 
 
-@pytest.mark.parametrize("argv", [["--replace"], ["--dry-run", "--full"]])
+@pytest.mark.parametrize("argv", [["--replace"], ["--recluster"], ["--dry-run", "--full"]])
 def test_main_rejects_contradictory_flags(argv):
     with pytest.raises(SystemExit) as raised:
         process.main(argv)
