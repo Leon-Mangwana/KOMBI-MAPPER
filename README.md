@@ -46,8 +46,10 @@ docker compose up -d postgis
 ```
 
 The OSRM service used for map matching needs a road network prepared from an OSM
-extract before it will start — see [infra/README.md](infra/README.md). Nothing
-but map matching needs it, so the rest can come up first.
+extract before it will start. `./build-osrm.sh --up` downloads the Zimbabwe
+extract and prepares it (several minutes, a few GB) — see
+[infra/README.md](infra/README.md). Nothing but map matching needs it, so the
+rest can come up first.
 
 **2. API** — [api/README.md](api/README.md)
 
@@ -80,7 +82,8 @@ Once some traces have been uploaded, and with OSRM running:
 cd pipeline
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python process.py --full          # match new traces, re-cluster, re-export GTFS
+cp .env.example .env
+python process.py --full          # match new traces, rebuild the network, re-export GTFS
 ```
 
 `process.py` is the whole backend in one command. Run the stages separately
