@@ -18,6 +18,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Git Bash on Windows rewrites arguments that look like POSIX paths into
+# Windows ones, so `/opt/car.lua` reaches the container as
+# `C:/Program Files/Git/opt/car.lua`. These are container paths; leave them.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL="*"
+
 EXTRACT_URL="https://download.geofabrik.de/africa/zimbabwe-latest.osm.pbf"
 PBF="data/zimbabwe-latest.osm.pbf"
 OSRM="/data/zimbabwe-latest.osrm" # the path inside the container
@@ -46,22 +52,55 @@ fi
 
 mkdir -p data
 
-if [[ $refresh -eq 1 || ! -f "$PBF" ]]; then
-  echo "==> Downloading $EXTRACT_URL"
-  curl -L --fail --progress-bar -o "$PBF" "$EXTRACT_URL"
-  # Geofabrik publishes an MD5 beside every extract; a truncated download is
-  # the usual reason osrm-extract dies with an unhelpful parse error.
-  curl -L --fail --silent -o "$PBF.md5" "$EXTRACT_URL.md5"
-  (cd data && md5sum -c "$(basename "$PBF").md5")
+checksum_ok() {
+  (cd data && md5sum -c --quiet "$(basename "$PBF").md5" >/dev/null 2>&1)
+}
+
+# Geofabrik publishes an MD5 beside every extract. It decides whether the file
+# on disk is complete: a download that dropped partway through 180 MB is the
+# usual reason osrm-extract later dies with an unhelpful parse error, and a
+# file that merely exists proves nothing.
+if [[ $refresh -eq 1 ]]; then
+  rm -f "$PBF" "$PBF.md5"
+fi
+curl -L --fail --silent -o "$PBF.md5" "$EXTRACT_URL.md5"
+
+if [[ -f "$PBF" ]] && checksum_ok; then
+  echo "==> Using existing $PBF (checksum matches; pass --refresh to re-download)"
 else
-  echo "==> Using existing $PBF (pass --refresh to re-download)"
+  echo "==> Downloading $EXTRACT_URL"
+  # -C - resumes a partial file; the retries cover a dropped connection.
+  curl -L --fail --progress-bar -C - --retry 5 --retry-all-errors --retry-delay 5     -o "$PBF" "$EXTRACT_URL" || true
+  if ! checksum_ok; then
+    # A resume the server refused, or a stale partial from an older extract
+    # than today's checksum describes. Start over once.
+    echo "==> Checksum mismatch after resume; downloading from scratch"
+    rm -f "$PBF"
+    curl -L --fail --progress-bar --retry 5 --retry-all-errors --retry-delay 5       -o "$PBF" "$EXTRACT_URL"
+    checksum_ok || {
+      echo "checksum still does not match; refusing to build from a bad extract" >&2
+      exit 1
+    }
+  fi
 fi
 
 # The server must not hold the dataset open while it is rewritten.
 docker compose stop osrm >/dev/null 2>&1 || true
 
 echo "==> osrm-extract (car profile; the slow step)"
-docker compose run --rm osrm osrm-extract -p /opt/car.lua "/${PBF}"
+if ! docker compose run --rm osrm osrm-extract -p /opt/car.lua "/${PBF}"; then
+  cat >&2 <<MSG
+
+osrm-extract failed. If the log above says "Cannot allocate memory", the Docker
+VM is too small for the whole-country extract: it needs roughly 4 GB free while
+it runs. Docker currently has $(docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB", $1/1024/1024/1024}') in total, shared with every other
+running container (docker stats --no-stream). Either stop the others for the
+duration, or raise the limit (Docker Desktop > Settings > Resources, or
+%UserProfile%\.wslconfig on Windows) and run this again; it resumes from the
+downloaded extract.
+MSG
+  exit 1
+fi
 
 echo "==> osrm-partition"
 docker compose run --rm osrm osrm-partition "$OSRM"

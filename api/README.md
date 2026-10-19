@@ -111,6 +111,11 @@ export TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/k
 pytest
 ```
 
+`tests/test_migrations.py` runs `alembic upgrade head` against that database
+and asserts autogenerate has nothing to add, so a column changed in
+`app/models.py` without a migration fails the suite rather than the deploy. It
+also checks `downgrade base` removes everything again.
+
 ## CORS
 
 Both front ends call the API with `fetch()` from their own origins, so those

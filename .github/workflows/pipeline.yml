@@ -20,8 +20,10 @@ jobs:
 
     # No services: the pipeline suite drives pure functions over synthetic
     # traces and a mocked OSRM, so it needs neither Postgres nor a matcher.
-    # The functions that do touch the database are thin and covered by the API
-    # suite, which has PostGIS.
+    # The functions that do touch the database (clean.load_trace,
+    # cluster.persist_network, gtfs.load_export_network) are thin raw-SQL
+    # wrappers and are not under test here; they are exercised by running
+    # `seed_demo.py` against a real database — see pipeline/README.md.
 
     steps:
       - uses: actions/checkout@v4
