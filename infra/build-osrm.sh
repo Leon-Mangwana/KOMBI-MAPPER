@@ -56,27 +56,37 @@ checksum_ok() {
   (cd data && md5sum -c --quiet "$(basename "$PBF").md5" >/dev/null 2>&1)
 }
 
-# Geofabrik publishes an MD5 beside every extract. It decides whether the file
-# on disk is complete: a download that dropped partway through 180 MB is the
-# usual reason osrm-extract later dies with an unhelpful parse error, and a
-# file that merely exists proves nothing.
+fetch_checksum() {
+  # Fetched once, alongside the download it describes. Geofabrik rebuilds the
+  # extract daily, so fetching it again later would describe a different file
+  # and condemn a perfectly good one on disk.
+  curl -L --fail --silent --retry 5 --retry-all-errors -o "$PBF.md5" "$EXTRACT_URL.md5"
+}
+
 if [[ $refresh -eq 1 ]]; then
   rm -f "$PBF" "$PBF.md5"
 fi
-curl -L --fail --silent -o "$PBF.md5" "$EXTRACT_URL.md5"
 
-if [[ -f "$PBF" ]] && checksum_ok; then
-  echo "==> Using existing $PBF (checksum matches; pass --refresh to re-download)"
+if [[ -f "$PBF" && -f "$PBF.md5" ]] && checksum_ok; then
+  echo "==> Using existing $PBF (matches its checksum; pass --refresh for today's extract)"
 else
+  if [[ ! -f "$PBF.md5" || ! -f "$PBF" ]]; then
+    fetch_checksum
+  fi
   echo "==> Downloading $EXTRACT_URL"
-  # -C - resumes a partial file; the retries cover a dropped connection.
-  curl -L --fail --progress-bar -C - --retry 5 --retry-all-errors --retry-delay 5     -o "$PBF" "$EXTRACT_URL" || true
+  # -C - resumes a partial file. A download that still fails after the retries
+  # is left in place: re-running resumes it rather than starting the 180 MB over.
+  if ! curl -L --fail --progress-bar -C - --retry 5 --retry-all-errors --retry-delay 5     -o "$PBF" "$EXTRACT_URL"; then
+    echo "download interrupted at $(stat -c %s "$PBF" 2>/dev/null || echo 0) bytes; run this again to resume" >&2
+    exit 1
+  fi
   if ! checksum_ok; then
-    # A resume the server refused, or a stale partial from an older extract
-    # than today's checksum describes. Start over once.
-    echo "==> Checksum mismatch after resume; downloading from scratch"
-    rm -f "$PBF"
-    curl -L --fail --progress-bar --retry 5 --retry-all-errors --retry-delay 5       -o "$PBF" "$EXTRACT_URL"
+    # The download completed but does not match: the extract was rebuilt
+    # between the checksum fetch and now. Start over once with a fresh pair.
+    echo "==> Downloaded file does not match its checksum; the extract was rebuilt. Starting over."
+    rm -f "$PBF" "$PBF.md5"
+    fetch_checksum
+    curl -L --fail --progress-bar --retry 5 --retry-all-errors --retry-delay 5 -o "$PBF" "$EXTRACT_URL"
     checksum_ok || {
       echo "checksum still does not match; refusing to build from a bad extract" >&2
       exit 1
