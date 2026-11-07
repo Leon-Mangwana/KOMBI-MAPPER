@@ -229,6 +229,15 @@ The database is not part of the blueprint on purpose: Render's free Postgres is
 deleted after 30 days, which is a poor home for contributed traces. Supabase and
 Neon both have PostGIS and a persistent free tier.
 
+**Supabase pauses a free project after seven days without traffic**, and a
+paused one is eventually deleted. The symptom is indirect: the pooler answers
+`tenant/user ... not found`, and because this container runs `alembic upgrade
+head` at boot, the API never starts and Render's health check never passes, so
+the front ends report the route server as unreachable. Restore the project from
+the Supabase dashboard; nothing needs redeploying. A nightly pipeline run (see
+[`../pipeline/README.md`](../pipeline/README.md)) also counts as traffic and
+keeps it awake.
+
 **`GET /gtfs.zip` will 404 in a split deployment.** The API serves a file the
 pipeline wrote, and the pipeline runs on an operator's machine — they share no
 filesystem. Export into the web app's `public/` folder and serve the feed from
