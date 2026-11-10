@@ -73,6 +73,14 @@ Then set `VITE_GTFS_URL=/gtfs.zip` and redeploy. The feed is committed and ships
 with the site, so publishing a new one is a commit and a deploy — which also
 gives you a history of what was published when.
 
+The header shows the **GTFS feed** link only when something answers at that
+URL with a file. Until the first export has been published there is nothing to
+link to, and on Netlify a missing path falls through to the catch-all redirect
+and comes back as `index.html` — so a bare link would download an HTML page
+named `gtfs.zip`. The check runs on mount: a `GET` whose body is cancelled
+as soon as the headers arrive. Not `HEAD`, because the API's feed route
+answers `GET` only.
+
 ## What it draws
 
 | Layer              | What                                                     |
