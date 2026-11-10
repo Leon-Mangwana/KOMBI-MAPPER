@@ -72,6 +72,13 @@ def migrated(engine, monkeypatch):
 
 def test_migrations_match_the_models(migrated):
     with migrated.connect() as conn:
+        # Compare the public schema only. The postgis Docker image installs the
+        # tiger geocoder and topology extensions into POSTGRES_DB, and they put
+        # their own schemas on the database's search_path. Reflection follows
+        # the search_path, so on CI, where POSTGRES_DB *is* the test database,
+        # autogenerate reported sixty-odd tiger tables as ones the models had
+        # "removed". The migrations own public and nothing else.
+        conn.execute(text("SET search_path TO public"))
         context = MigrationContext.configure(
             conn,
             opts={"include_object": _include_object, "compare_type": True},

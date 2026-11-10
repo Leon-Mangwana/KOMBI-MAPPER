@@ -3,6 +3,13 @@
 Like test_cors.py these run without PostGIS. That is not a shortcut — every
 check here is meant to happen *before* the database is touched, so a test that
 needed one would be testing the wrong thing.
+
+It is also enforced: `forbid_database` fails any test here whose request
+reaches `get_db`. The module-level client has no session override, so without
+that guard a request that passed the check under test would carry on into
+whatever `DATABASE_URL` names — the real database locally, and on CI a
+database that does not exist. A test that must get past the guard and into a
+handler asks for `no_database`, which answers every lookup with nothing.
 """
 
 import pytest
@@ -18,6 +25,76 @@ from app.security import IngestGuardMiddleware, RateLimiter
 client = TestClient(app)
 
 VALID_TRACE = {"contributor": "leon", "points": [{"lat": -17.83, "lon": 31.05}]}
+
+
+class NoRows(Session):
+    """A session with no engine behind it.
+
+    Every lookup finds nothing — `get` returns None and `execute` reports no
+    rows affected — so a handler that is reached answers 404 instead of
+    opening a connection. That 404 is the signal the tests below want: the
+    check under test let the request through.
+    """
+
+    def __init__(self) -> None:  # no engine, nothing to connect to
+        pass
+
+    def get(self, *args, **kwargs):
+        return None
+
+    def execute(self, *args, **kwargs):
+        return _NoRowsResult()
+
+    def commit(self) -> None:
+        pass
+
+    def rollback(self) -> None:
+        pass
+
+
+class _NoRowsResult:
+    rowcount = 0
+
+
+def _no_database():
+    yield NoRows()
+
+
+class RefusedDatabase:
+    """Stands in for the session when nothing may use it.
+
+    Handed out rather than raised at once because FastAPI enters `get_db`
+    before it validates the body: a request that ends in 422 still opens the
+    dependency, and a real session costs nothing until it is used. So this
+    objects to being *used* — the first method call fails the test and names
+    the call that reached it.
+    """
+
+    def __getattr__(self, name: str):
+        raise AssertionError(
+            f"a request in test_security.py reached the database (session.{name}); "
+            "these tests must stop before it, or stub it with the `no_database` fixture"
+        )
+
+
+def _refuse_database():
+    yield RefusedDatabase()
+
+
+@pytest.fixture(autouse=True)
+def forbid_database():
+    """No request in this module may reach the database — see the module docstring."""
+    app.dependency_overrides[get_db] = _refuse_database
+    yield
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture()
+def no_database():
+    """Let a request past the guard into a handler that finds nothing."""
+    app.dependency_overrides[get_db] = _no_database
+    yield
+    app.dependency_overrides.pop(get_db, None)
 
 
 # --------------------------------------------------------------------------
@@ -54,14 +131,17 @@ def test_raw_trace_rejects_a_missing_token(monkeypatch):
         ("s3cret", " s3cret "),
     ],
 )
-def test_surrounding_whitespace_does_not_break_the_token(monkeypatch, configured, supplied):
+def test_surrounding_whitespace_does_not_break_the_token(
+    monkeypatch, no_database, configured, supplied
+):
     """A trailing newline in a hosting dashboard is invisible and looks like a
     wrong token. Both sides are stripped so it cannot cost an afternoon."""
     monkeypatch.setattr(settings, "admin_token", configured)
 
     resp = client.patch("/routes/1", json={"short_name": "A"}, headers={"X-Admin-Token": supplied})
 
-    assert resp.status_code != 401, "the token should have been accepted"
+    # 404 is the handler answering: the token was accepted and no route 1 exists.
+    assert resp.status_code == 404, "the token should have been accepted"
 
 
 def test_a_whitespace_only_token_is_treated_as_unset(monkeypatch):
@@ -79,7 +159,7 @@ def test_raw_trace_rejects_a_wrong_token(monkeypatch):
     assert resp.status_code == 401
 
 
-def test_raw_trace_admits_the_right_token(monkeypatch):
+def test_raw_trace_admits_the_right_token(monkeypatch, no_database):
     """With the token accepted the request reaches the handler.
 
     The database is stubbed with a session that finds nothing, so a 404 here
@@ -87,21 +167,7 @@ def test_raw_trace_admits_the_right_token(monkeypatch):
     """
     monkeypatch.setattr(settings, "admin_token", "s3cret")
 
-    class NoTrace(Session):
-        def __init__(self) -> None:  # no engine, nothing to connect to
-            pass
-
-        def get(self, *args, **kwargs):
-            return None
-
-    def no_database():
-        yield NoTrace()
-
-    app.dependency_overrides[get_db] = no_database
-    try:
-        resp = client.get("/traces/1", headers={"X-Admin-Token": "s3cret"})
-    finally:
-        app.dependency_overrides.clear()
+    resp = client.get("/traces/1", headers={"X-Admin-Token": "s3cret"})
 
     assert resp.status_code == 404
 
@@ -172,16 +238,21 @@ def test_upload_within_the_size_limit_gets_past_the_guard(monkeypatch):
 
 
 def test_a_trace_with_too_many_points_is_rejected(monkeypatch):
-    """The per-field cap, which only applies once the body is parsed."""
+    """The per-field cap, which only applies once the body is parsed.
+
+    One point over the limit: small enough that the size guard lets it through,
+    so the schema is what refuses it. The cap is read into `TraceIn` when the
+    module is imported, so the value to exceed is the one `settings` held then.
+    """
     monkeypatch.setattr(settings, "max_upload_bytes", 8_000_000)
-    points = [{"lat": -17.83, "lon": 31.05}] * 3
+    points = [{"lat": -17.83, "lon": 31.05}] * (settings.max_trace_points + 1)
 
     resp = client.post("/traces", json={"contributor": "leon", "points": points})
 
-    # The configured maximum is far above 3, so this is accepted by the schema
-    # and fails later for want of a database — what matters is that it is not
-    # a validation error about length.
-    assert resp.status_code != 422
+    assert resp.status_code == 422
+    (error,) = resp.json()["detail"]
+    assert error["loc"] == ["body", "points"]
+    assert error["type"] == "too_long"
 
 
 # --------------------------------------------------------------------------
