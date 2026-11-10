@@ -12,9 +12,33 @@ const admin = useAdminStore()
 
 const tokenEntry = ref('')
 
+// Whether there is a feed to link to. The feed is a file the pipeline
+// exports, published separately from the network, and until the first export
+// there is nothing at the URL: the API answers 404, and the deployed site's
+// catch-all redirect answers with index.html — so a bare link would hand a
+// visitor an HTML page named gtfs.zip. Ask before showing the link.
+//
+// A GET whose body is cancelled once the headers are in, rather than a HEAD:
+// the API's feed route answers GET only, and HEAD there is a 405 that would
+// hide a feed that exists. The question is whether the file is there, not
+// what is in it, so nothing past the headers is read.
+const feedAvailable = ref(false)
+
+async function checkFeed(): Promise<void> {
+  try {
+    const response = await fetch(gtfsUrl)
+    void response.body?.cancel()
+    const type = response.headers.get('content-type') ?? ''
+    feedAvailable.value = response.ok && !type.includes('text/html')
+  } catch {
+    feedAvailable.value = false
+  }
+}
+
 onMounted(() => {
   void store.load()
   admin.watchHash()
+  void checkFeed()
 })
 
 function signIn(): void {
@@ -31,8 +55,9 @@ function signIn(): void {
         <p class="header__subtitle">Harare's minibus network, mapped by the people who ride it</p>
       </div>
       <!-- A plain link, not a fetch: the feed is a file, and the browser's own
-           download handling is better than anything this page would do. -->
-      <a class="header__gtfs" :href="gtfsUrl" download>GTFS feed</a>
+           download handling is better than anything this page would do. Shown
+           only once a feed has been published — see checkFeed. -->
+      <a v-if="feedAvailable" class="header__gtfs" :href="gtfsUrl" download>GTFS feed</a>
     </header>
 
     <!-- Operator mode, reached with #admin in the URL. The API checks the
