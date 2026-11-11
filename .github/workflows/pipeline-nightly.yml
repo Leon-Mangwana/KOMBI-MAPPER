@@ -76,10 +76,16 @@ jobs:
           path: infra/data/zimbabwe-latest.osrm*
           key: ${{ steps.week.outputs.key }}
 
+      # OSRM writes the dataset as root inside its container, and one file
+      # (.fileIndex) is not world-readable, so the cache step, which runs as
+      # the runner user, cannot archive it and the week's network is never
+      # saved. Hand the files back to the runner user once they are built.
       - name: Build the road network
         if: steps.osrm-cache.outputs.cache-hit != 'true'
         working-directory: infra
-        run: bash build-osrm.sh
+        run: |
+          bash build-osrm.sh
+          sudo chown -R "$(id -u):$(id -g)" data
 
       - name: Start OSRM
         working-directory: infra
