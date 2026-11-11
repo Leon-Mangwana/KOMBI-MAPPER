@@ -1,0 +1,142 @@
+name: pipeline-nightly
+
+# The batch half of the system, run in the cloud: map-match newly uploaded
+# traces against the road network, rebuild routes and stops, and publish the
+# GTFS feed. Nothing triggers this stage otherwise — the API only stores
+# uploads, and the deployed API has no OSRM to call — and running it here
+# rather than on an operator's machine means nothing depends on one
+# particular computer being switched on. See
+# pipeline/README.md#running-it-on-a-schedule.
+#
+# Needs one repository secret, DATABASE_URL: the same psycopg URL the API
+# uses on Render (Supabase session pooler, ?sslmode=require).
+
+on:
+  schedule:
+    # 00:17 UTC is 02:17 in Harare. Off the hour on purpose: GitHub delays
+    # scheduled runs that are due exactly on it.
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Clean and match only. Writes nothing to the database and publishes nothing."
+        type: boolean
+        default: false
+      recluster:
+        description: "Rebuild the network and the feed even if nothing new matched (after tuning a threshold)."
+        type: boolean
+        default: false
+
+# One run at a time. Clustering replaces the whole network, so two runs
+# interleaving would each rebuild from a different view of the table.
+concurrency:
+  group: pipeline-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: write # to commit the exported feed
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OSRM_URL: http://localhost:5000
+      # Relative to pipeline/, where process.py runs: the feed is exported
+      # straight into the web app, which serves it — see web/README.md.
+      GTFS_PATH: ../web/public/gtfs.zip
+      # Repository variables of the same names override these.
+      GTFS_AGENCY_NAME: ${{ vars.GTFS_AGENCY_NAME || 'Leon' }}
+      GTFS_AGENCY_URL: ${{ vars.GTFS_AGENCY_URL || 'https://hilarious-souffle-6b60ca.netlify.app' }}
+
+    steps:
+      - name: Check the database secret is set
+        if: env.DATABASE_URL == ''
+        run: |
+          echo "::error::Repository secret DATABASE_URL is not set (Settings > Secrets and variables > Actions)."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      # The road network is rebuilt weekly, not nightly. Preparing it takes
+      # minutes and downloads 180 MB from Geofabrik; roads in Harare do not
+      # change faster than that matters, and a week-old graph matches as well
+      # as last night's. The key names the OSRM version as well as the week,
+      # because a dataset prepared by one version is refused by another.
+      - name: Road-network cache key
+        id: week
+        run: echo "key=osrm-v5.25.0-zimbabwe-$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore this week's road network
+        id: osrm-cache
+        uses: actions/cache@v4
+        with:
+          path: infra/data/zimbabwe-latest.osrm*
+          key: ${{ steps.week.outputs.key }}
+
+      - name: Build the road network
+        if: steps.osrm-cache.outputs.cache-hit != 'true'
+        working-directory: infra
+        run: bash build-osrm.sh
+
+      - name: Start OSRM
+        working-directory: infra
+        run: |
+          docker compose up -d osrm
+          for _ in $(seq 1 36); do
+            if curl -sf -o /dev/null "http://localhost:5000/nearest/v1/driving/31.0522,-17.8292"; then
+              echo "OSRM is answering."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::OSRM did not answer within 3 minutes."
+          docker compose logs osrm
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+
+      - name: Install the pipeline
+        working-directory: pipeline
+        run: pip install .
+
+      # Exits non-zero when OSRM stops answering mid-run; the traces it had
+      # not reached stay `uploaded` and the next run picks them up.
+      - name: Match new traces, rebuild the network, export the feed
+        working-directory: pipeline
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          RECLUSTER: ${{ inputs.recluster }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            python process.py --dry-run
+          elif [[ "$RECLUSTER" == "true" ]]; then
+            python process.py --full --recluster
+          else
+            python process.py --full
+          fi
+
+      # The export is byte-identical when the network has not changed, so an
+      # unchanged night commits nothing. A changed feed is committed to main,
+      # where Netlify picks it up and republishes the map with it.
+      # `[skip render]` keeps Render from redeploying the API for a commit that
+      # touches nothing it serves.
+      - name: Publish the feed
+        if: inputs.dry_run != true
+        run: |
+          if [[ -z "$(git status --porcelain -- web/public/gtfs.zip)" ]]; then
+            echo "Feed unchanged; nothing to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/public/gtfs.zip
+          git commit -m "data: publish GTFS feed [skip render]"
+          git pull --rebase origin main
+          git push origin HEAD:main

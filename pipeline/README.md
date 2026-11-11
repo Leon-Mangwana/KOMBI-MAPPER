@@ -140,14 +140,37 @@ one; names survive through [naming](#naming). (`--replace` is accepted as the
 old spelling of `--recluster`, so existing cron lines keep working.)
 
 **Running it on a schedule.** Nothing triggers this stage: the API only stores
-uploads, and the deployed API has no OSRM to call. The pipeline runs on an
-operator's machine, where OSRM and this checkout are, so the schedule lives
-there too. `process.py --full` is idempotent — nothing new means nothing
-rewritten, and a run that OSRM interrupts leaves the backlog `uploaded` for the
-next one — so it is safe to run as often as you like. Nightly is plenty:
+uploads, and the deployed API has no OSRM to call. `process.py --full` is
+idempotent — nothing new means nothing rewritten, and a run that OSRM
+interrupts leaves the backlog `uploaded` for the next one — so it is safe to run
+as often as you like. Nightly is plenty.
+
+In production it runs in GitHub Actions,
+[`../.github/workflows/pipeline-nightly.yml`](../.github/workflows/pipeline-nightly.yml),
+at 00:17 UTC (02:17 in Harare), so nothing depends on one particular computer
+being switched on. Each run brings up OSRM on the runner, matches whatever was
+uploaded since the last run, rebuilds the network, exports the feed into
+`web/public/gtfs.zip` and, when the feed changed, commits it to `main`, where
+Netlify republishes the map with it. The road network is prepared once a week
+and cached, so most runs skip the slow part.
+
+It needs one repository secret, `DATABASE_URL`: the same URL the API uses on
+Render. `GTFS_AGENCY_NAME` and `GTFS_AGENCY_URL` can be overridden with
+repository variables of the same names. To run it now, or to try a change
+safely, use **Actions → pipeline-nightly → Run workflow**: `dry_run` cleans and
+matches without writing anything, and `recluster` rebuilds even when nothing
+new matched.
+
+Two things worth knowing. Feed commits are made by `github-actions[bot]`, carry
+`[skip render]` so the API is not redeployed for them, and do not trigger the
+other workflows. And GitHub disables scheduled workflows in a public repository
+after 60 days without commits; if the network goes that long without changing,
+GitHub emails a warning, and re-enabling it is one click on the Actions tab.
+
+To run it on your own machine instead, with OSRM up:
 
 ```bash
-# cron (Linux/macOS): 02:00 daily, with OSRM up
+# cron (Linux/macOS): 02:00 daily
 0 2 * * * cd /path/to/pipeline && .venv/bin/python process.py --full >> process.log 2>&1
 ```
 
@@ -157,9 +180,8 @@ schtasks /Create /SC DAILY /ST 02:00 /TN "Kombi pipeline" `
   /TR "cmd /c cd /d C:\path\to\pipeline && .venv\Scripts\python.exe process.py --full >> process.log 2>&1"
 ```
 
-When the API is deployed apart from the pipeline, the exported feed still has
-to reach it — see [GTFS export](#gtfs-export) for the `web/public/gtfs.zip`
-hand-off, which a scheduled run cannot do for you.
+A local run exports the feed but does not publish it: commit and push
+`web/public/gtfs.zip` afterwards. See [GTFS export](#gtfs-export).
 
 ### Cleaning
 
