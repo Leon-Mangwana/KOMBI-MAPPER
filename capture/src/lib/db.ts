@@ -9,6 +9,8 @@
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 
+import type { UploadIssueKind } from './uploadIssue'
+
 export type TraceStatus =
   /** Actively being recorded right now. */
   | 'recording'
@@ -31,7 +33,16 @@ export interface StoredTrace {
   /** `id` assigned by the API once uploaded. */
   remoteId: number | null
   attempts: number
+  /** Technical text of the last upload failure, for a "Details" disclosure. */
   lastError: string | null
+  // The fields below are optional because rows written by older builds lack
+  // them; object stores are schemaless, so no DB_VERSION bump is needed.
+  /** Classified reason for `lastError` (see lib/uploadIssue). */
+  lastErrorKind?: UploadIssueKind | null
+  /** HTTP status of the last failure, or null when there was no response. */
+  lastErrorStatus?: number | null
+  /** Epoch ms when the API accepted the trace. */
+  uploadedAt?: number | null
 }
 
 export interface StoredPoint {
