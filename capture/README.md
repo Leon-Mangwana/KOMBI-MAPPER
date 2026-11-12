@@ -2,7 +2,7 @@
 
 Installable PWA for recording a GPS trace while riding a kombi. One screen: a
 MapLibre map showing your position and the trace so far, and one big
-**Start/Stop** button.
+**Start/Stop** button. A short welcome sheet explains it the first time.
 
 Stack: Vue 3 (`<script setup>`) · TypeScript · Vite · Pinia · vite-plugin-pwa ·
 MapLibre GL JS · idb.
@@ -55,6 +55,37 @@ archive serves both front ends and `VITE_PMTILES_URL=/harare.pmtiles` works
 locally and on Netlify alike. Refreshing the map means replacing the copy in
 `web/public/` only.
 
+## First run
+
+Contributors are strangers with a phone, so the app explains itself once: a
+welcome sheet (`src/components/WelcomeSheet.vue`, a native `<dialog>`) says what
+the app is for, gives three steps — Start when the kombi pulls off, keep the
+page open, Stop when you get off — asks for a nickname, and says who can see
+the data. It is remembered under `localStorage` key `kombi-capture:welcome:v1`
+and reopened with the **?** button in the header. On Android Chrome it also
+offers **Install app** (via `beforeinstallprompt`, `src/lib/install.ts`);
+elsewhere it shows an add-to-home-screen tip unless already installed.
+
+The nickname is required, so the team can tell contributors apart, but it does
+not need to be a real name. The privacy line is accurate: raw traces
+(`GET /traces/{id}`) are operator-only on the API, and the public endpoints
+serve only clustered routes and stops.
+
+## Strings
+
+Every user-facing string lives in `src/i18n/en.ts`, grouped by screen area.
+Text with numbers in it is a function, so each language applies its own plural
+rules. The store never imports it: it reports codes (`notice.kind`,
+`uploadIssue.kind`, `receipt.phase`, `uploadPhase`) and the components turn
+them into words. `satisfies Record<…>` makes a missing notice or error kind a
+compile error.
+
+To add a language, copy `en.ts` to e.g. `sn.ts`, translate it, type it
+`export const sn: Strings = { … }` so the compiler checks every key, and choose
+between them in `src/i18n/index.ts`. Not covered: the PWA manifest name and
+description (`vite.config.ts`) and the page `<title>`, which are fixed at build
+time.
+
 ## How recording works
 
 **Points are never buffered in memory.** A phone in a pocket for a 40-minute
@@ -70,7 +101,12 @@ with it. Every position is written to IndexedDB (via `idb`) as it arrives:
   whenever the page is hidden and does not restore it, so it is re-acquired on
   every `visibilitychange` back to visible. If the lock is refused, recording
   continues and the header shows *Screen may sleep*.
-- On **Stop**, the trace is marked `pending` and `POST`ed to `/traces`.
+- On **Stop**, the trace is marked `pending` and `POST`ed to `/traces`, and a
+  receipt shows *Ride saved · N points · M min*, then *Uploaded. Thank you!*
+  for a few seconds, then a running *You've contributed N rides from this
+  phone.*
+- Start is guarded against a double tap, which used to create two traces and
+  leave a second GPS watch running after Stop.
 
 Points are stored raw — no smoothing, no accuracy filtering. Cleaning and
 outlier rejection are the pipeline's job, and it can only do them properly with
@@ -78,26 +114,54 @@ the full observation (`accuracy_m`, `speed_mps`, timestamp).
 
 ### Upload queue
 
-A finished trace stays in IndexedDB until the API confirms it.
+A finished trace stays in IndexedDB until the API confirms it. Every failure is
+sorted into a kind (`src/lib/uploadIssue.ts`) with plain-language copy; the raw
+error stays available under **Details**.
 
-- Upload failure from network/timeout/5xx → the trace stays `pending`, and the
-  queue is retried when `window` fires `online` (or via **Retry now**).
-- A 4xx rejection (other than 408/425/429) will never succeed on retry, so the
-  trace is marked `failed` and listed with **Retry** / **Discard** buttons.
-- On success the points are deleted and a small metadata receipt is kept.
+| Kind       | Cause                                                   | Then                         |
+| ---------- | ------------------------------------------------------- | ---------------------------- |
+| `network`  | No response: offline, DNS, CORS, timeout (120 s)        | stays `pending`, auto-retry  |
+| `server`   | 5xx, 408, 425                                           | stays `pending`, auto-retry  |
+| `busy`     | 429                                                     | stays `pending`, retry ≥60 s |
+| `too-long` | 413, or a 422 for too many points                       | marked `failed`              |
+| `rejected` | any other 4xx                                           | marked `failed`              |
+
+- **Automatic retry** while online: 15 s, 30 s, 60 s, 2 min, then every 5 min,
+  each with up to 20% random extra so phones coming back online do not retry
+  in lockstep. The backoff resets on success, on reconnect and on **Retry
+  now**. A retry that came due while the page was hidden (browsers freeze
+  timers there) runs as soon as the page is visible again.
+- **429** waits at least a minute. The API sends `Retry-After`, but it is not
+  readable cross-origin until the API lists it in CORS `expose_headers`; once
+  it does, the app honours it with no change here.
+- A 500 from the API's error handler, or a 502/503 from the host's proxy,
+  carries no CORS headers, so the browser reports it as a network failure.
+  The copy is right either way: the ride is saved and will be retried.
+- A ride stopped while an upload is in flight (a slow cold start, say) is
+  uploaded straight after it rather than waiting for the next trigger.
+- After 10 s in flight the status reads *Still uploading. The server can take
+  up to a minute to wake up.*
+- `failed` rides are listed with the reason, **Try again** and **Discard**
+  (which asks first — the ride is deleted from the phone).
+- On success the points are deleted and a small metadata receipt is kept,
+  stamped `uploadedAt`.
 - On launch, any trace still marked `recording` or `uploading` is evidence the
   tab was killed mid-session. Its points are already on disk, so it is
-  re-queued rather than thrown away.
+  re-queued rather than thrown away. If the server had already stored it, this
+  uploads it twice; preventing that needs an idempotency key on the API.
 
 ### Failure states the UI handles
 
-| Situation                     | What you see                                                  |
-| ----------------------------- | ------------------------------------------------------------- |
-| Permission denied             | Recording stops, *Location denied* chip, settings hint         |
-| No fix yet                    | *Waiting for a GPS fix…*, `0` points, timer still running      |
-| `POSITION_UNAVAILABLE`        | *No GPS signal* — keeps watching, does not stop the recording  |
-| No Geolocation / insecure origin | *No GPS* chip explaining HTTPS is required                  |
-| Offline at Stop               | Trace queues locally; uploads when the connection returns      |
+| Situation                        | What you see                                                       |
+| -------------------------------- | ------------------------------------------------------------------ |
+| No nickname                      | Start reads *Add a nickname to start*; tapping it focuses the field |
+| Location blocked for the site    | Notice on load explaining how to turn it on                         |
+| Permission refused at Start      | Recording stops, *Location off* chip, settings hint                 |
+| No fix yet                       | *Finding GPS…* chip and *Finding your position…* on the map          |
+| `POSITION_UNAVAILABLE`           | *Weak GPS* — keeps watching, does not stop the recording             |
+| No Geolocation / insecure origin | *No GPS* chip and a notice explaining HTTPS is required              |
+| Offline at Stop                  | *You're offline…*; uploads the moment the connection returns         |
+| Stop with no points              | *No GPS points were recorded, so nothing was saved.*                 |
 
 ## Data shape
 
@@ -127,6 +191,17 @@ pipeline, reprojected to EPSG:32736. See `../CLAUDE.md`.
 - Icons are SVG (`public/icon.svg`). Chrome accepts SVG for installability; add
   192px and 512px PNGs to `public/` and list them in the `manifest.icons` array
   in `vite.config.ts` if you need wider platform coverage.
+
+## Accessibility
+
+- Pinch zoom is allowed (no `user-scalable=no`), and the nickname field is
+  16 px so iOS does not zoom the page when it is focused.
+- Keyboard focus shows an amber ring (`--accent`, the same as the public map).
+- Notices that stop recording working are `role="alert"`; the upload status is
+  an `aria-live` region, so screen readers hear "Uploaded. Thank you!".
+- Buttons are at least 44 px tall and text at least 0.8 rem.
+- `prefers-reduced-motion` turns off the blinking, the marker pulse and the
+  map's follow animation.
 
 ## Scripts
 
