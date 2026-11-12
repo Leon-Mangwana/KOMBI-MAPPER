@@ -7,6 +7,10 @@
   --ok: #4ade80;
   --warn: #fbbf24;
   --danger: #f87171;
+  /* Focus rings and highlights; the same amber as the public map's accent. */
+  --accent: #fbbf24;
+  /* Borders that must stay visible on --surface (inputs, secondary buttons). */
+  --line-strong: #64748b;
 
   color-scheme: dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -44,6 +48,47 @@ input {
   font: inherit;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Secondary actions: Retry now, Try again, Discard, Install app. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.6rem;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.btn--primary {
+  border-color: transparent;
+  background: #16a34a;
+  color: #f8fafc;
+}
+
+.btn--danger {
+  color: var(--danger);
+}
+
+/* Respect "reduce motion": no blinking, pulsing or button squish. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* MapLibre's controls default to a light theme; tone them down. */
 .maplibregl-ctrl-group {
   background: var(--surface);
@@ -52,6 +97,17 @@ input {
 
 .maplibregl-ctrl-group button + button {
   border-top-color: var(--line);
+}
+
+/* MapLibre's zoom buttons are 29 px with dark icons, close to invisible on
+   this theme and small for a thumb in a moving kombi. */
+.maplibregl-ctrl-group button {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(0.9);
 }
 
 .maplibregl-ctrl-attrib {
