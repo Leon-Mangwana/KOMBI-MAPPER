@@ -6,7 +6,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 
-import { t } from '@/i18n'
+import { availableLocales, type Locale, locale, setLocale, t } from '@/i18n'
 import { installAvailable, isStandalone, promptInstall } from '@/lib/install'
 import { useRecordingStore } from '@/stores/recording'
 
@@ -18,6 +18,14 @@ const dialog = ref<HTMLDialogElement | null>(null)
 
 const canInstall = computed(() => installAvailable.value)
 const titleId = 'welcome-title'
+
+// Changing language reloads the page, so not during a ride or an upload.
+const languageLocked = computed(() => store.isRecording || store.uploadPhase === 'uploading')
+
+function onLanguageChange(event: Event): void {
+  const code = (event.target as HTMLSelectElement).value as Locale
+  if (code !== locale) setLocale(code)
+}
 
 function sync(): void {
   const el = dialog.value
@@ -61,6 +69,21 @@ watch(() => props.open, sync)
       </button>
 
       <h2 :id="titleId" class="sheet__title">{{ t.welcome.title }}</h2>
+
+      <!-- Hidden until a second language is translated and marked ready. -->
+      <label v-if="availableLocales.length > 1" class="field field--inline">
+        <span class="field__label">{{ t.welcome.language }}</span>
+        <select
+          class="field__input"
+          :value="locale"
+          :disabled="languageLocked"
+          @change="onLanguageChange"
+        >
+          <option v-for="option in availableLocales" :key="option.code" :value="option.code">
+            {{ option.name }}
+          </option>
+        </select>
+      </label>
       <p class="sheet__intro">{{ t.welcome.intro }}</p>
 
       <ol class="steps">
@@ -224,6 +247,17 @@ watch(() => props.open, sync)
 
 .field__input:disabled {
   opacity: 0.6;
+}
+
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.field--inline .field__input {
+  flex: 0 1 12rem;
 }
 
 .field__help {
