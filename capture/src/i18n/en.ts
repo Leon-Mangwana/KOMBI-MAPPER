@@ -54,7 +54,10 @@ export const en = {
     stop: 'Stop',
     needsNickname: 'Add a nickname to start',
     readyHint: 'Press Start when your kombi pulls off.',
-    recordingHint: 'Keep this page open. Press Stop when you get off.',
+    // Until the first fix nothing is being recorded; pressing Stop now loses
+    // the ride, so say what to wait for.
+    findingHint: 'Finding GPS… Keep this page open. Recording starts when the blue dot appears.',
+    recordingHint: 'GPS ready. Keep this page open and press Stop when you get off.',
     privacy: 'Only the project team sees nicknames and individual rides.',
   },
 
@@ -72,7 +75,7 @@ export const en = {
       "Couldn't save the latest point on this phone. If this keeps happening, free up some storage space.",
     'location-error': 'Location error. Recording continues and will keep trying.',
     'empty-ride':
-      'No GPS points were recorded, so nothing was saved. Try again near a window or outside.',
+      'No GPS position was found before you pressed Stop, so nothing was saved. Next time, wait for the blue dot. Outside or near a window is quickest.',
     'needs-nickname': 'Add a nickname before you start.',
   } satisfies Record<NoticeKind, string>,
 
@@ -141,7 +144,7 @@ export const en = {
     steps: [
       {
         title: 'Press Start when the kombi pulls off',
-        body: 'Your phone will ask to use your location. Tap Allow.',
+        body: 'Your phone will ask to use your location. Tap Allow. Recording starts when the blue dot appears.',
       },
       {
         title: 'Keep this page open',
@@ -160,8 +163,14 @@ export const en = {
     install: 'Install app',
     installTip:
       'Tip: add this app to your home screen from your browser menu so it is one tap away.',
+    language: 'Language',
     continue: 'Continue',
     close: 'Close',
+  },
+
+  update: {
+    ready: 'A new version of the app is ready.',
+    apply: 'Update',
   },
 
   map: {
