@@ -134,11 +134,28 @@ function pmtilesStyle(url: string): StyleSpecification {
         paint: { 'fill-color': '#132038', 'fill-opacity': 0.55 },
       },
       {
+        // Polygons only. Protomaps keeps rivers and streams in this same
+        // layer as *lines*, and a fill layer closes a line and fills it: the
+        // Mukuvisi River became a lake several kilometres across south-east of
+        // the CBD. Lines are drawn as lines by `water-lines` below.
         id: 'water',
         type: 'fill',
         source: 'protomaps',
         'source-layer': 'water',
+        filter: ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false],
         paint: { 'fill-color': '#0a2a3d' },
+      },
+      {
+        id: 'water-lines',
+        type: 'line',
+        source: 'protomaps',
+        'source-layer': 'water',
+        filter: ['match', ['geometry-type'], ['LineString', 'MultiLineString'], true, false],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#0a2a3d',
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.75, 14, 2.5, 18, 6],
+        },
       },
       {
         id: 'buildings',
