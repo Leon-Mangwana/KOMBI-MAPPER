@@ -8,10 +8,21 @@
  *   3. Neither — a blank background. Position and trace still render, which is
  *      all a contributor strictly needs to confirm the app is working.
  */
-import maplibregl, { type StyleSpecification } from 'maplibre-gl'
+import maplibregl, { type FilterSpecification, type StyleSpecification } from 'maplibre-gl'
 import { Protocol } from 'pmtiles'
 
 const BACKGROUND = '#0f1729'
+const WATER = '#0b2f45'
+
+/** Vector tiles report multi-part geometries under the single-part type. */
+const POLYGONS: FilterSpecification = ['match', ['geometry-type'], ['Polygon', 'MultiPolygon'], true, false]
+const LINES: FilterSpecification = [
+  'match',
+  ['geometry-type'],
+  ['LineString', 'MultiLineString'],
+  true,
+  false,
+]
 
 let protocolRegistered = false
 
@@ -60,11 +71,28 @@ function pmtilesStyle(url: string): StyleSpecification {
         paint: { 'fill-color': '#16233d', 'fill-opacity': 0.6 },
       },
       {
+        // Polygons only. Protomaps keeps rivers and streams in this same
+        // layer as *lines*, and a fill layer closes a line and fills it: the
+        // Mukuvisi River became a lake several kilometres across south-east of
+        // the CBD. Lines are drawn as lines by `water-lines` below.
         id: 'water',
         type: 'fill',
         source: 'protomaps',
         'source-layer': 'water',
-        paint: { 'fill-color': '#0b2f45' },
+        filter: POLYGONS,
+        paint: { 'fill-color': WATER },
+      },
+      {
+        id: 'water-lines',
+        type: 'line',
+        source: 'protomaps',
+        'source-layer': 'water',
+        filter: LINES,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': WATER,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.75, 14, 2.5, 18, 6],
+        },
       },
       {
         id: 'buildings',

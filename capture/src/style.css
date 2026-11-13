@@ -113,6 +113,8 @@ input {
 .maplibregl-ctrl-attrib {
   background: rgb(15 23 42 / 80%) !important;
   color: var(--text-muted);
+  /* MapLibre's 12 px is below the 0.8rem minimum used everywhere else. */
+  font-size: 0.8rem;
 }
 
 .maplibregl-ctrl-attrib a {

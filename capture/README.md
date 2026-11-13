@@ -44,6 +44,12 @@ landuse, water, buildings, roads) so no glyph server is required. For proper
 cartography with labels, host a full style JSON and use
 `VITE_BASEMAP_STYLE_URL`.
 
+Protomaps keeps rivers and streams in the `water` layer as **lines**, next to
+lakes as polygons. A fill layer closes a line and fills it, which once drew the
+Mukuvisi River as a lake several kilometres across south-east of the CBD. So
+`water` is filtered to polygons and a `water-lines` layer draws the rest as
+lines. The public map's style (`../web/src/lib/basemap.ts`) does the same.
+
 With neither set, the map falls back to a blank background. Your position and
 the live trace still render — enough to confirm recording works, just with no
 map underneath.
@@ -80,11 +86,21 @@ rules. The store never imports it: it reports codes (`notice.kind`,
 them into words. `satisfies Record<…>` makes a missing notice or error kind a
 compile error.
 
-To add a language, copy `en.ts` to e.g. `sn.ts`, translate it, type it
-`export const sn: Strings = { … }` so the compiler checks every key, and choose
-between them in `src/i18n/index.ts`. Not covered: the PWA manifest name and
-description (`vite.config.ts`) and the page `<title>`, which are fixed at build
-time.
+The language is chosen once at load: the rider's saved choice, then the phone's
+language settings, then English. A language switch appears in the welcome sheet
+as soon as two languages are ready; changing it reloads the page, so it is
+locked during a ride or an upload.
+
+**Shona** is set up and waiting for its text: `src/i18n/sn.ts` is a full copy
+of the English, typed `Strings`, with `snReady = false` so riders never see it.
+To ship it, translate every string in place (keep the keys and the functions'
+shape), have a Shona speaker review it on a phone, and set `snReady = true`.
+Phones set to Shona then get it automatically. Another language follows the
+same pattern: copy `en.ts`, type it `Strings`, and add it to `LOCALES` in
+`src/i18n/index.ts`.
+
+Not covered: the PWA manifest name and description (`vite.config.ts`) and the
+page `<title>`, which are fixed at build time.
 
 ## How recording works
 
@@ -157,11 +173,12 @@ error stays available under **Details**.
 | No nickname                      | Start reads *Add a nickname to start*; tapping it focuses the field |
 | Location blocked for the site    | Notice on load explaining how to turn it on                         |
 | Permission refused at Start      | Recording stops, *Location off* chip, settings hint                 |
-| No fix yet                       | *Finding GPS…* chip and *Finding your position…* on the map          |
+| No fix yet                       | *Finding GPS…* chip, *Finding your position…* on the map, and a hint that recording starts when the blue dot appears |
+| First fix of a ride              | A short vibration (Android) and the hint changes to *GPS ready…*      |
 | `POSITION_UNAVAILABLE`           | *Weak GPS* — keeps watching, does not stop the recording             |
 | No Geolocation / insecure origin | *No GPS* chip and a notice explaining HTTPS is required              |
 | Offline at Stop                  | *You're offline…*; uploads the moment the connection returns         |
-| Stop with no points              | *No GPS points were recorded, so nothing was saved.*                 |
+| Stop with no points              | *No GPS position was found before you pressed Stop…* — nothing saved, and it says to wait for the blue dot |
 
 ## Data shape
 
@@ -186,6 +203,16 @@ pipeline, reprojected to EPSG:32736. See `../CLAUDE.md`.
 - `registerType: 'autoUpdate'`; the app shell is precached, so it launches
   offline. Map tiles are **not** precached — an offline launch shows the blank
   background style until tiles are reachable.
+- **Updates.** A new deploy is fetched in the background and its service
+  worker takes over the open page, but the page keeps running the code it
+  loaded with. `src/lib/updates.ts` notices the takeover (`controllerchange`,
+  ignoring the very first install) and the app shows *A new version of the app
+  is ready* with an **Update** button that reloads. It is never automatic and
+  never shown during a ride or an upload: a reload mid-ride would end the ride,
+  and mid-upload would send it twice. A page left open checks for a new version
+  hourly and whenever it comes back to the foreground. Phones still running a
+  build from before this existed pick it up the usual way, on their next
+  launch.
 - `devOptions.enabled` is on, so install and offline behaviour can be exercised
   with `npm run dev`.
 - Icons are SVG (`public/icon.svg`). Chrome accepts SVG for installability; add
