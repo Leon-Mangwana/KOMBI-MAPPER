@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import MapView from '@/components/MapView.vue'
 import UploadStatus from '@/components/UploadStatus.vue'
 import WelcomeSheet from '@/components/WelcomeSheet.vue'
 import { t } from '@/i18n'
 import { formatAccuracy, formatElapsed } from '@/lib/format'
+import { applyUpdate, updateReady } from '@/lib/updates'
 import { type NoticeKind, useRecordingStore } from '@/stores/recording'
 
 const store = useRecordingStore()
@@ -84,10 +85,28 @@ const startBlocked = computed(() => !store.isRecording && !store.canStart)
 const nicknameMissing = computed(() => !store.isRecording && !store.contributor.trim())
 
 const hint = computed<string | null>(() => {
-  if (store.isRecording) return t.record.recordingHint
+  if (store.isRecording) return store.hasFix ? t.record.recordingHint : t.record.findingHint
   if (startBlocked.value || store.notice || store.receipt) return null
   return t.record.readyHint
 })
+
+// The first fix of a ride is the moment recording actually begins. A short
+// buzz tells a rider with the phone in their lap that it worked; before it,
+// pressing Stop saves nothing. (No-op where vibration is unsupported, e.g.
+// iPhone.)
+watch(
+  () => store.hasFix,
+  (hasFix, hadFix) => {
+    if (hasFix && !hadFix && store.isRecording) navigator.vibrate?.(200)
+  },
+)
+
+// ---- new version ----------------------------------------------------------
+// Offered only between rides and uploads: reloading mid-ride would end the
+// ride, and mid-upload would send it again.
+const showUpdate = computed(
+  () => updateReady.value && !store.isRecording && store.uploadPhase !== 'uploading',
+)
 
 const recordClass = computed(() => {
   if (store.isRecording) return 'record--stop'
@@ -153,6 +172,13 @@ function onRecordPress(): void {
     <MapView />
 
     <section class="panel">
+      <div v-if="showUpdate" class="update" role="status">
+        <span class="update__text">{{ t.update.ready }}</span>
+        <button type="button" class="btn btn--primary" @click="applyUpdate">
+          {{ t.update.apply }}
+        </button>
+      </div>
+
       <div v-if="store.isRecording" class="stats">
         <div class="stat">
           <span class="stat__value">{{ store.pointCount }}</span>
@@ -306,6 +332,23 @@ function onRecordPress(): void {
   padding: 0.9rem 0.9rem calc(env(safe-area-inset-bottom) + 0.9rem);
   background: var(--surface);
   border-top: 1px solid var(--line);
+}
+
+.update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+  background: rgb(251 191 36 / 8%);
+}
+
+.update__text {
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .stats {
