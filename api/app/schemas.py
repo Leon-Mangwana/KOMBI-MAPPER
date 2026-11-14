@@ -20,6 +20,9 @@ class TraceIn(BaseModel):
     # config.Settings. The size limit in security.py is the coarser guard that
     # runs before this one, since this cannot apply until the body is parsed.
     points: list[TracePointIn] = Field(min_length=1, max_length=settings.max_trace_points)
+    # Optional, free text: the route as the rider would name it. Blank is
+    # stored as null — see `create_trace`.
+    route_hint: str | None = Field(default=None, max_length=255)
 
 
 class TraceCreated(BaseModel):
