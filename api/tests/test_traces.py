@@ -95,3 +95,62 @@ def test_post_trace_is_atomic_on_bad_point(client):
     # and the per-test truncate.
     ok = client.post("/traces", json={"contributor": "leon", "points": SAMPLE_POINTS})
     assert ok.status_code == 201
+
+
+# --------------------------------------------------------------------------
+# Route hints — "which route did you ride"
+# --------------------------------------------------------------------------
+
+
+def test_a_route_hint_is_stored_and_shown_to_the_operator(client, admin):
+    created = client.post(
+        "/traces",
+        json={"contributor": "leon", "points": SAMPLE_POINTS, "route_hint": "Mbare - Copacabana"},
+    )
+    assert created.status_code == 201
+
+    feature = client.get(f"/traces/{created.json()['id']}", headers=admin).json()
+
+    assert feature["properties"]["route_hint"] == "Mbare - Copacabana"
+
+
+def test_a_hint_is_optional(client, admin):
+    """The field is new; every existing client omits it."""
+    created = client.post("/traces", json={"contributor": "leon", "points": SAMPLE_POINTS})
+
+    feature = client.get(f"/traces/{created.json()['id']}", headers=admin).json()
+
+    assert feature["properties"]["route_hint"] is None
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_a_blank_hint_is_stored_as_null(client, admin, blank):
+    """An emptied text box must not become a blank suggestion."""
+    created = client.post(
+        "/traces", json={"contributor": "leon", "points": SAMPLE_POINTS, "route_hint": blank}
+    )
+    assert created.status_code == 201
+
+    feature = client.get(f"/traces/{created.json()['id']}", headers=admin).json()
+
+    assert feature["properties"]["route_hint"] is None
+
+
+def test_a_hint_is_trimmed(client, admin):
+    created = client.post(
+        "/traces", json={"contributor": "leon", "points": SAMPLE_POINTS, "route_hint": "  4  "}
+    )
+
+    feature = client.get(f"/traces/{created.json()['id']}", headers=admin).json()
+
+    assert feature["properties"]["route_hint"] == "4"
+
+
+def test_a_hint_that_is_too_long_is_rejected(client):
+    resp = client.post(
+        "/traces", json={"contributor": "leon", "points": SAMPLE_POINTS, "route_hint": "x" * 256}
+    )
+
+    assert resp.status_code == 422
+    (error,) = resp.json()["detail"]
+    assert error["loc"] == ["body", "route_hint"]
