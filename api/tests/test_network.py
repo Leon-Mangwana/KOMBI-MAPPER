@@ -284,3 +284,72 @@ def test_stop_with_no_routes_reports_an_empty_list(client, engine):
     features = client.get("/stops").json()["features"]
 
     assert features[0]["properties"]["route_ids"] == []
+
+
+# --------------------------------------------------------------------------
+# /routes/{id}/hints — what riders said they rode
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def hinted(engine, network):
+    """Traces on route A with hints in a few spellings, plus one on route B."""
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO traces (contributor, status, route_id, route_hint) "
+                "VALUES (:c, 'matched', :r, :h)"
+            ),
+            [
+                {"c": "tari", "r": network["route_a"], "h": "Mbare - CBD"},
+                {"c": "rudo", "r": network["route_a"], "h": "Mbare - CBD"},
+                {"c": "tino", "r": network["route_a"], "h": "mbare - cbd"},
+                {"c": "leon", "r": network["route_a"], "h": "Route 4"},
+                {"c": "tari", "r": network["route_b"], "h": "Highfield"},
+            ],
+        )
+    return network
+
+
+def test_hints_are_grouped_case_insensitively_and_counted(client, admin, hinted):
+    resp = client.get(f"/routes/{hinted['route_a']}/hints", headers=admin)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["route_id"] == hinted["route_a"]
+    # The commonest spelling labels the group; the count covers every spelling.
+    assert body["hints"] == [
+        {"hint": "Mbare - CBD", "count": 3},
+        {"hint": "Route 4", "count": 1},
+    ]
+
+
+def test_hints_belong_to_one_route(client, admin, hinted):
+    resp = client.get(f"/routes/{hinted['route_b']}/hints", headers=admin)
+
+    assert resp.json()["hints"] == [{"hint": "Highfield", "count": 1}]
+
+
+def test_a_route_with_no_hints_reports_an_empty_list(client, admin, network):
+    """The fixture's one trace on route A has no hint; unhinted traces are not counted."""
+    resp = client.get(f"/routes/{network['route_a']}/hints", headers=admin)
+
+    assert resp.status_code == 200
+    assert resp.json()["hints"] == []
+
+
+def test_hints_for_a_missing_route_are_a_404(client, admin, network):
+    resp = client.get("/routes/999999/hints", headers=admin)
+
+    assert resp.status_code == 404
+
+
+def test_hints_never_appear_in_the_public_route_responses(client, hinted):
+    """Hints are riders' free text; they reach the map only once an operator
+    has turned them into a name."""
+    listed = client.get("/routes").json()
+    single = client.get(f"/routes/{hinted['route_a']}").json()
+
+    for feature in [*listed["features"], single]:
+        assert "route_hint" not in feature["properties"]
+        assert "hints" not in feature["properties"]
