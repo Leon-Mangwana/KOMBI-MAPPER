@@ -4,7 +4,7 @@
  * receipt for the ride just stopped, what the upload queue is doing, the
  * running contribution count, and rides the server refused.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { t } from '@/i18n'
 import { useRecordingStore } from '@/stores/recording'
@@ -49,6 +49,34 @@ const showContributed = computed(
   () => !store.receipt && !store.isRecording && store.uploadedCount > 0,
 )
 
+// ---- "Which route was this?" ------------------------------------------
+// Shown inside the receipt while the store is holding that ride's upload for
+// an answer. Save or Skip releases it; so does putting the phone away.
+const hintInput = ref('')
+const hintSaving = ref(false)
+
+const askingHint = computed(
+  () => store.receipt !== null && store.awaitingHint === store.receipt.traceId,
+)
+
+// A fresh ride gets an empty box, not the last ride's answer.
+watch(
+  () => store.awaitingHint,
+  () => {
+    hintInput.value = ''
+  },
+)
+
+async function saveHint(): Promise<void> {
+  if (hintSaving.value) return
+  hintSaving.value = true
+  try {
+    await store.saveHint(hintInput.value)
+  } finally {
+    hintSaving.value = false
+  }
+}
+
 function discard(traceId: string): void {
   // Discarding deletes the only copy of the ride, so ask first.
   if (window.confirm(t.failed.discardConfirm)) void store.discard(traceId)
@@ -66,6 +94,33 @@ function discard(traceId: string): void {
       >
         <p class="receipt__title">{{ receiptTitle }}</p>
         <p class="receipt__summary">{{ receiptSummary }}</p>
+        <p v-if="store.receipt.routeHint" class="receipt__route">
+          {{ t.receipt.route(store.receipt.routeHint) }}
+        </p>
+
+        <form v-if="askingHint" class="hint" @submit.prevent="saveHint">
+          <label class="hint__label" for="route-hint">{{ t.hint.label }}</label>
+          <p class="hint__help">{{ t.hint.help }}</p>
+          <input
+            id="route-hint"
+            v-model="hintInput"
+            class="hint__input"
+            type="text"
+            inputmode="text"
+            autocomplete="off"
+            enterkeyhint="done"
+            maxlength="255"
+            :placeholder="t.hint.placeholder"
+          />
+          <div class="hint__actions">
+            <button type="submit" class="btn btn--primary" :disabled="hintSaving">
+              {{ t.hint.save }}
+            </button>
+            <button type="button" class="btn" :disabled="hintSaving" @click="store.skipHint()">
+              {{ t.hint.skip }}
+            </button>
+          </div>
+        </form>
       </div>
 
       <div v-if="phaseText" class="phase">
@@ -145,6 +200,48 @@ p {
   margin-top: 0.15rem;
   font-size: 0.9rem;
   color: var(--text-muted);
+}
+
+.receipt__route {
+  margin-top: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.hint {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--line);
+}
+
+.hint__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.hint__help {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.hint__input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  /* 16px: anything smaller makes iOS zoom the page when the field is focused. */
+  font-size: 1rem;
+}
+
+.hint__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.2rem;
 }
 
 .phase {
