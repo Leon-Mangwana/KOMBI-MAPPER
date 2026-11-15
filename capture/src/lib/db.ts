@@ -43,6 +43,8 @@ export interface StoredTrace {
   lastErrorStatus?: number | null
   /** Epoch ms when the API accepted the trace. */
   uploadedAt?: number | null
+  /** What the rider said they rode, typed after Stop. Sent as `route_hint`. */
+  routeHint?: string | null
 }
 
 export interface StoredPoint {
