@@ -80,6 +80,32 @@ export async function fetchRoute(routeId: number, signal?: AbortSignal): Promise
   return await getJson<RouteFeature>(`/routes/${routeId}`, signal)
 }
 
+/** One thing riders called a route, and how many of them said so. */
+export interface RouteHint {
+  hint: string
+  count: number
+}
+
+/**
+ * What riders said they rode, for the traces clustered into one route.
+ *
+ * Operator-only: these are contributors' own words, and the API keeps them off
+ * the public route responses until a person has turned them into a name.
+ * Grouped case-insensitively and ordered most common first by the server.
+ */
+export async function fetchRouteHints(
+  routeId: number,
+  token: string,
+  signal?: AbortSignal,
+): Promise<RouteHint[]> {
+  const body = await getJson<{ route_id: number; hints: RouteHint[] }>(
+    `/routes/${routeId}/hints`,
+    signal,
+    { 'X-Admin-Token': token },
+  )
+  return body.hints
+}
+
 /** Names an operator can set on a route. Omit a field to leave it unchanged. */
 export interface RouteNames {
   short_name?: string | null
@@ -124,10 +150,14 @@ async function sendJson<T>(path: string, body: unknown, token: string): Promise<
   return (await response.json()) as T
 }
 
-async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function getJson<T>(
+  path: string,
+  signal?: AbortSignal,
+  headers?: Record<string, string>,
+): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, { signal })
+    response = await fetch(`${API_BASE_URL}${path}`, { signal, headers })
   } catch (error) {
     // Unreachable host, DNS failure, CORS rejection, abort. The message the
     // browser gives is not worth showing a visitor, so the caller substitutes
