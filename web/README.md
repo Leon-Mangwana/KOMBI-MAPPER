@@ -109,6 +109,10 @@ done, so the app has a naming UI:
 2. Paste the API's `ADMIN_TOKEN` and unlock.
 3. Select a route: its short and long name become editable, and each stop in the
    list becomes an inline text box. Changes save on submit and on blur.
+4. Under the name fields, *Riders called this route* lists what contributors
+   typed after Stop in the capture app, with how many said each. Clicking one
+   fills a name field (a bare number or "Route 4" goes to the short name,
+   anything wordier to the long name); it is still only saved on submit.
 
 Hiding the controls behind `#admin` is **not** the security boundary — the API
 checks the token on every write, and refuses without it. It keeps the public map
