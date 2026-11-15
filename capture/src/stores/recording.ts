@@ -77,6 +77,8 @@ export interface RideReceipt {
   pointCount: number
   durationMs: number
   phase: 'saved' | 'uploaded'
+  /** The route the rider named for this ride, once they have. */
+  routeHint: string | null
 }
 
 /** What the upload queue is doing, for the status line. */
@@ -114,6 +116,16 @@ const SLOW_UPLOAD_MS = 10_000
 
 /** How long "Uploaded. Thank you!" stays up. */
 const RECEIPT_TTL_MS = 8_000
+
+/**
+ * How long after Stop the upload waits for the rider to name the route.
+ *
+ * The hint travels in the same request as the points, so the upload has to
+ * hold while the field is on screen. It does not hold forever: a rider who
+ * walks off without answering still gets their ride uploaded, and the hint is
+ * only ever a bonus.
+ */
+const HINT_GRACE_MS = 120_000
 
 /** Notices about the ride in progress; they mean nothing once it has stopped. */
 const TRANSIENT_NOTICES: ReadonlySet<NoticeKind> = new Set<NoticeKind>([
@@ -160,6 +172,12 @@ export const useRecordingStore = defineStore('recording', () => {
   const receipt = ref<RideReceipt | null>(null)
   /** Epoch ms of the next automatic retry, or null when none is scheduled. */
   const nextRetryAt = ref<number | null>(null)
+  /**
+   * The ride whose upload is held while the rider is asked which route it
+   * was. Null once they answer, skip, start another ride, put the phone away
+   * or the grace period runs out.
+   */
+  const awaitingHint = ref<string | null>(null)
 
   // ---- non-reactive handles ---------------------------------------------
   let watchId: number | null = null
@@ -174,6 +192,7 @@ export const useRecordingStore = defineStore('recording', () => {
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let receiptTimer: ReturnType<typeof setTimeout> | null = null
   let slowTimer: ReturnType<typeof setTimeout> | null = null
+  let hintTimer: ReturnType<typeof setTimeout> | null = null
 
   const wakeLock = new ScreenWakeLock(
     () => status.value === 'recording',
@@ -262,6 +281,19 @@ export const useRecordingStore = defineStore('recording', () => {
       receiptTimer = null
     }
     receipt.value = null
+    // The field lives in the receipt card; no card, nothing to wait for.
+    releaseHint()
+  }
+
+  /** Stop holding the upload for a hint, and send whatever is queued. */
+  function releaseHint(): void {
+    if (hintTimer !== null) {
+      clearTimeout(hintTimer)
+      hintTimer = null
+    }
+    if (awaitingHint.value === null) return
+    awaitingHint.value = null
+    void flushQueue()
   }
 
   /** Turn "Ride saved" into "Uploaded. Thank you!" for a while, then clear it. */
@@ -281,7 +313,12 @@ export const useRecordingStore = defineStore('recording', () => {
    * due while the phone was in a pocket is run as soon as the page is back.
    */
   function handleVisibility(): void {
-    if (document.visibilityState !== 'visible') return
+    if (document.visibilityState !== 'visible') {
+      // Phone put away with the question unanswered: the ride goes up now
+      // rather than waiting on an answer that is not coming.
+      releaseHint()
+      return
+    }
     online.value = navigator.onLine
     if (!online.value || flushing) return
     if (nextRetryAt.value !== null && Date.now() >= nextRetryAt.value) {
@@ -381,7 +418,7 @@ export const useRecordingStore = defineStore('recording', () => {
     starting = true
     try {
       const trace = await createTrace(name)
-      clearReceipt()
+      clearReceipt() // also releases a held upload
       currentTraceId.value = trace.id
       pointCount.value = 0
       path.value = []
@@ -493,12 +530,40 @@ export const useRecordingStore = defineStore('recording', () => {
         // Keep the denial notice — it explains *why* there were no points.
         if (gps.value !== 'denied') notice.value = { kind: 'empty-ride' }
       } else if (trace) {
-        receipt.value = { traceId, pointCount: trace.pointCount, durationMs, phase: 'saved' }
+        receipt.value = {
+          traceId,
+          pointCount: trace.pointCount,
+          durationMs,
+          phase: 'saved',
+          routeHint: null,
+        }
+        // Hold this one ride back and ask which route it was. Anything else
+        // in the queue still goes.
+        awaitingHint.value = traceId
+        hintTimer = setTimeout(() => {
+          hintTimer = null
+          releaseHint()
+        }, HINT_GRACE_MS)
       }
     }
 
     await refreshTraces()
     void flushQueue()
+  }
+
+  /** Record what the rider said they rode, then let the upload go. */
+  async function saveHint(hint: string): Promise<void> {
+    const traceId = awaitingHint.value
+    if (traceId === null) return
+    const routeHint = hint.trim() || null
+    await patchTrace(traceId, { routeHint })
+    if (receipt.value?.traceId === traceId) receipt.value = { ...receipt.value, routeHint }
+    releaseHint()
+  }
+
+  /** "Skip": upload without a hint. */
+  function skipHint(): void {
+    releaseHint()
   }
 
   /**
@@ -528,8 +593,9 @@ export const useRecordingStore = defineStore('recording', () => {
         .sort((a, b) => a.startedAt - b.startedAt)
 
       for (const trace of pending) {
-        // Never upload the recording that is still in progress.
-        if (trace.id === currentTraceId.value) continue
+        // Never upload the recording that is still in progress, nor the one
+        // the rider is still being asked about.
+        if (trace.id === currentTraceId.value || trace.id === awaitingHint.value) continue
 
         const points = await getPoints(trace.id)
         if (points.length === 0) {
@@ -545,7 +611,9 @@ export const useRecordingStore = defineStore('recording', () => {
         }, SLOW_UPLOAD_MS)
 
         try {
-          const created = await uploadTrace(trace.contributor, points)
+          const created = await uploadTrace(trace.contributor, points, {
+            routeHint: trace.routeHint ?? null,
+          })
           await patchTrace(trace.id, {
             status: 'uploaded',
             remoteId: created.id,
@@ -654,6 +722,7 @@ export const useRecordingStore = defineStore('recording', () => {
     uploadSlow,
     receipt,
     nextRetryAt,
+    awaitingHint,
     // getters
     isRecording,
     elapsedMs,
@@ -672,5 +741,7 @@ export const useRecordingStore = defineStore('recording', () => {
     retry,
     discard,
     setContributor,
+    saveHint,
+    skipHint,
   }
 })
