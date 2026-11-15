@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
+import { fetchRouteHints, type RouteHint } from '@/lib/api'
 import { formatLength, plural, routeName, stopName } from '@/lib/format'
 import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
@@ -62,6 +63,51 @@ async function saveStopName(stopId: number, value: string): Promise<void> {
   }
 }
 
+// --- Rider hints -----------------------------------------------------------
+// What riders typed after Stop ("which route was this?") for the rides that
+// clustered into the selected route. They are suggestions for the name fields,
+// not names: an operator still decides what goes on the map.
+
+const hints = ref<RouteHint[]>([])
+const hintsError = ref<string | null>(null)
+let hintsRequest: AbortController | null = null
+
+watch(
+  () => [store.selectedRoute?.id ?? null, admin.active] as const,
+  ([routeId, active]) => {
+    hintsRequest?.abort()
+    hintsRequest = null
+    hints.value = []
+    hintsError.value = null
+    if (routeId === null || !active) return
+
+    const request = new AbortController()
+    hintsRequest = request
+    fetchRouteHints(routeId, admin.token, request.signal)
+      .then((result) => {
+        if (!request.signal.aborted) hints.value = result
+      })
+      .catch((error: unknown) => {
+        if (!request.signal.aborted) hintsError.value = describe(error)
+      })
+  },
+  { immediate: true },
+)
+
+/**
+ * Put a hint into the name field it is most likely meant for. A bare number
+ * or "Route 4" is a short name; anything wordier is a long name.
+ */
+function useHint(hint: string): void {
+  const short = /^(route\s*)?[a-z]?\d+[a-z]?$/i.exec(hint.trim())
+  if (short) {
+    shortName.value = hint.trim().replace(/^route\s*/i, '')
+  } else {
+    longName.value = hint.trim()
+  }
+  saved.value = false
+}
+
 function describe(error: unknown): string {
   const status = (error as { status?: number | null })?.status
   if (status === 401) return 'That admin token was rejected.'
@@ -116,6 +162,25 @@ const matches = computed(() => {
               maxlength="255"
             />
           </label>
+          <div v-if="hints.length" class="hints">
+            <p class="hints__label">Riders called this route</p>
+            <ul class="hints__list">
+              <li v-for="entry in hints" :key="entry.hint">
+                <button
+                  type="button"
+                  class="hints__chip"
+                  :title="`Use “${entry.hint}” as a name`"
+                  @click="useHint(entry.hint)"
+                >
+                  {{ entry.hint }}
+                  <span class="hints__count">×{{ entry.count }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+          <p v-else-if="hintsError" class="naming__error">{{ hintsError }}</p>
+          <p v-else class="hints__none">No rider has named this route yet.</p>
+
           <button type="submit" class="naming__save" :disabled="saving">
             {{ saving ? 'Saving…' : 'Save names' }}
           </button>
@@ -369,6 +434,49 @@ const matches = computed(() => {
   font-size: 0.87rem;
   text-transform: none;
   letter-spacing: normal;
+}
+
+.hints {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.hints__label,
+.hints__none {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.hints__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hints__chip {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+}
+
+.hints__chip:hover,
+.hints__chip:focus-visible {
+  border-color: var(--accent);
+}
+
+.hints__count {
+  margin-left: 0.25rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .naming__save {
