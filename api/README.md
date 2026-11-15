@@ -43,10 +43,13 @@ Interactive docs at http://localhost:8000/docs.
     "points": [
       {"lat": -17.8292, "lon": 31.0522, "recorded_at": "2026-07-24T08:00:00Z",
        "accuracy_m": 5.0, "speed_mps": 8.3}
-    ]
+    ],
+    "route_hint": "Mbare - Copacabana"
   }
   ```
-  All points are bulk-inserted in a single transaction.
+  All points are bulk-inserted in a single transaction. `route_hint` is
+  optional free text — what the rider said they rode. It is stored on the
+  trace, trimmed, with blank stored as null, and is never parsed.
 - `GET /traces/{id}` — **operator-only.** Returns the trace as a GeoJSON
   `Feature` (a `LineString` of its ordered points, with per-point attributes in
   `properties.points`). Requires `X-Admin-Token`; see [Security](#security).
@@ -56,6 +59,11 @@ Interactive docs at http://localhost:8000/docs.
   in `properties.stops`.
 - `GET /stops` — every stop as a `FeatureCollection`, each carrying the
   `route_ids` that serve it.
+- `GET /routes/{id}/hints` — **operator-only.** What riders said they rode,
+  for the traces clustered into this route: `{"route_id": 7, "hints":
+  [{"hint": "Mbare - CBD", "count": 3}, …]}`, grouped case-insensitively and
+  most common first. Suggestions for naming; never included in the public
+  route responses.
 - `PATCH /routes/{id}` — **operator-only.** Set or clear `short_name` /
   `long_name`. An omitted field is left alone; an explicit `null` clears it.
 - `PATCH /stops/{id}` — **operator-only.** Set or clear `name`.

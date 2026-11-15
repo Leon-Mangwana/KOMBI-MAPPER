@@ -22,10 +22,14 @@ def create_trace(payload: TraceIn, db: Session = Depends(get_db)) -> TraceCreate
     sent are on `TraceIn` and in the middleware — see app/security.py.
     """
     recorded_ats = [p.recorded_at for p in payload.points if p.recorded_at is not None]
+    # An emptied text box sends "" or "  "; neither is a hint, and storing it
+    # would put a blank row in the operator's suggestion list.
+    route_hint = (payload.route_hint or "").strip() or None
     trace = Trace(
         contributor=payload.contributor,
         status="uploaded",
         recorded_at=min(recorded_ats) if recorded_ats else None,
+        route_hint=route_hint,
     )
     db.add(trace)
     db.flush()  # assigns trace.id without committing
@@ -99,6 +103,7 @@ def get_trace(trace_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
             "contributor": trace.contributor,
             "status": trace.status,
             "route_id": trace.route_id,
+            "route_hint": trace.route_hint,
             "recorded_at": trace.recorded_at.isoformat() if trace.recorded_at else None,
             "points": [
                 {

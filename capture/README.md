@@ -117,10 +117,14 @@ with it. Every position is written to IndexedDB (via `idb`) as it arrives:
   whenever the page is hidden and does not restore it, so it is re-acquired on
   every `visibilitychange` back to visible. If the lock is refused, recording
   continues and the header shows *Screen may sleep*.
-- On **Stop**, the trace is marked `pending` and `POST`ed to `/traces`, and a
-  receipt shows *Ride saved · N points · M min*, then *Uploaded. Thank you!*
-  for a few seconds, then a running *You've contributed N rides from this
-  phone.*
+- On **Stop**, the trace is marked `pending` and a receipt shows *Ride saved ·
+  N points · M min* with one optional question underneath: *Which route was
+  this?* The answer is stored on the trace as `routeHint` and sent as
+  `route_hint`, where it becomes a naming suggestion for the operator. The
+  upload of that one ride is held while the question is on screen, and goes
+  ahead on Save, on Skip, when the page is hidden (phone put away), when
+  another ride starts, or after two minutes. Then *Uploaded. Thank you!* for a
+  few seconds, then a running *You've contributed N rides from this phone.*
 - Start is guarded against a double tap, which used to create two traces and
   leave a second GPS watch running after Stop.
 
@@ -190,10 +194,12 @@ Uploaded to `POST /traces` exactly as the API expects:
   "points": [
     { "lat": -17.8292, "lon": 31.0522, "recorded_at": "2026-07-24T08:00:00.000Z",
       "accuracy_m": 5, "speed_mps": 8.3 }
-  ]
+  ],
+  "route_hint": "Mbare – Copacabana"
 }
 ```
 
+`route_hint` is only present when the rider answered the question after Stop.
 Coordinates are WGS 84 (EPSG:4326), straight from the Geolocation API. The app
 does no metric geometry at all — every distance calculation happens in the
 pipeline, reprojected to EPSG:32736. See `../CLAUDE.md`.

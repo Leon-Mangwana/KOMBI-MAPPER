@@ -96,6 +96,16 @@ export const sn: Strings = {
     uploaded: 'Uploaded. Thank you!',
     summary: (points: number, durationMs: number) =>
       `${points} ${plural(points, 'point', 'points')} · ${rideDuration(durationMs)}`,
+    route: (hint: string) => `Route: ${hint}`,
+  },
+
+  // Asked once, right after Stop. Optional; the upload goes ahead without it.
+  hint: {
+    label: 'Which route was this?',
+    help: 'Optional. The name people call it, or where it runs.',
+    placeholder: 'e.g. Mbare – Copacabana, or Route 4',
+    save: 'Save',
+    skip: 'Skip',
   },
 
   upload: {

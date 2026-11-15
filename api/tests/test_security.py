@@ -181,6 +181,7 @@ def test_public_endpoints_need_no_token():
     ("method", "path", "body"),
     [
         ("get", "/traces/1", None),
+        ("get", "/routes/1/hints", None),
         ("patch", "/routes/1", {"short_name": "A"}),
         ("patch", "/stops/1", {"name": "Copacabana"}),
     ],
@@ -192,6 +193,13 @@ def test_every_operator_endpoint_is_guarded(monkeypatch, method, path, body):
     resp = getattr(client, method)(path, json=body) if body else getattr(client, method)(path)
 
     assert resp.status_code == 401
+
+
+def test_route_hints_are_unavailable_when_no_token_is_configured(monkeypatch):
+    """Hints are riders' own words about their ride: fail closed like raw traces."""
+    monkeypatch.setattr(settings, "admin_token", "")
+
+    assert client.get("/routes/1/hints").status_code == 503
 
 
 def test_naming_is_refused_when_no_token_is_configured(monkeypatch):

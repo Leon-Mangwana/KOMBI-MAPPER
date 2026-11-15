@@ -183,6 +183,56 @@ def update_stop(stop_id: int, payload: StopUpdate, db: Session = Depends(get_db)
     return _stop_feature(row, route_ids=_serving(db, stop_id))
 
 
+@router.get("/routes/{route_id}/hints", dependencies=[Depends(require_admin)])
+def route_hints(route_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """What riders said they rode, for the traces clustered into this route.
+
+    **Operator-only.** The hints are free text typed by contributors, and they
+    are here to help whoever names the route, not to be shown to the public:
+    `/routes` and `/routes/{id}` never carry them, so a hint cannot leak a
+    rider's words onto the map before a person has looked at it.
+
+    Grouped case-insensitively, most common first. The label of each group is
+    the spelling riders used most, so "Mbare - CBD" typed by three people and
+    "mbare - cbd" by one comes back once, as "Mbare - CBD" with a count of 4.
+    """
+    if db.get(Route, route_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found.")
+
+    rows = db.execute(
+        select(Trace.route_hint, func.count())
+        .where(Trace.route_id == route_id, Trace.route_hint.is_not(None))
+        .group_by(Trace.route_hint)
+    ).all()
+
+    return {"route_id": route_id, "hints": _group_hints(rows)}
+
+
+def _group_hints(rows: list[Any]) -> list[dict[str, Any]]:
+    """Merge spellings that differ only in case; label each group by its commonest.
+
+    Done here rather than in SQL because the label has to be one of the
+    original spellings, and "the most frequent value within a case-insensitive
+    group" is an ugly window query for a list that is never more than a few
+    dozen rows.
+    """
+    groups: dict[str, dict[str, int]] = {}
+    for hint, count in rows:
+        spellings = groups.setdefault(hint.casefold(), {})
+        spellings[hint] = spellings.get(hint, 0) + count
+
+    hints = [
+        {
+            "hint": max(spellings, key=lambda spelling: (spellings[spelling], spelling)),
+            "count": sum(spellings.values()),
+        }
+        for spellings in groups.values()
+    ]
+    # Ties broken alphabetically so the order is stable between requests.
+    hints.sort(key=lambda entry: (-entry["count"], entry["hint"].casefold()))
+    return hints
+
+
 def _clean(values: dict[str, Any]) -> dict[str, Any]:
     """Trim the supplied names; treat blank as a request to clear.
 

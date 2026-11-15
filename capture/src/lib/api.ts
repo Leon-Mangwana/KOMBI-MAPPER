@@ -83,10 +83,15 @@ function defaultSignal(): AbortSignal | undefined {
 export async function uploadTrace(
   contributor: string,
   points: StoredPoint[],
-  signal?: AbortSignal,
+  options: { routeHint?: string | null; signal?: AbortSignal } = {},
 ): Promise<TraceCreated> {
+  const { signal } = options
+  const routeHint = options.routeHint?.trim() || null
   const body = {
     contributor,
+    // Omitted rather than null when there is none, so the payload of a ride
+    // without a hint is byte-for-byte what older builds send.
+    ...(routeHint ? { route_hint: routeHint } : {}),
     points: points.map((p) => ({
       lat: p.lat,
       lon: p.lon,

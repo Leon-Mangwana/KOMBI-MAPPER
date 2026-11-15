@@ -75,6 +75,11 @@ class Trace(Base):
         ForeignKey("routes.id", ondelete="SET NULL"), index=True
     )
     matched_geom = mapped_column(Geometry("LINESTRING", srid=4326, spatial_index=False))
+    # What the rider said they rode, in their own words ("Mbare - Copacabana",
+    # "Route 4"). Free text, never parsed: it is a hint for the operator naming
+    # the route the trace clusters into, not a route reference. See
+    # routers/network.py `route_hints`.
+    route_hint: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     route: Mapped[Route | None] = relationship(back_populates="traces")
