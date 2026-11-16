@@ -1,0 +1,11 @@
+{
+  // The service worker is a worker, not a page: it is checked against the
+  // WebWorker lib on its own so that DOM and worker globals never mix.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/sw.ts", "src/lib/swMessages.ts"],
+  "exclude": []
+}
