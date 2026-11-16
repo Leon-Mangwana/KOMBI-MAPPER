@@ -6,13 +6,35 @@ import UploadStatus from '@/components/UploadStatus.vue'
 import WelcomeSheet from '@/components/WelcomeSheet.vue'
 import { t } from '@/i18n'
 import { formatAccuracy, formatElapsed } from '@/lib/format'
+import {
+  askForNotifications,
+  closeArrivalNotification,
+  shouldAskForNotifications,
+  showArrivalNotification,
+} from '@/lib/notifications'
+import type { ArrivalMessage } from '@/lib/swMessages'
 import { applyUpdate, updateReady } from '@/lib/updates'
 import { type NoticeKind, useRecordingStore } from '@/stores/recording'
 
 const store = useRecordingStore()
 
+// The store never holds text; the Android media control's label comes from here.
+store.setMediaLabels({ title: t.keepAlive.title, artist: t.keepAlive.artist })
+
 onMounted(() => {
   void store.init()
+
+  // Buttons on the system notification come back through the service worker.
+  // Registering the listener also turns on the message queue, so an action
+  // posted to a freshly opened page before this runs is delivered, not lost.
+  navigator.serviceWorker?.addEventListener('message', (event: MessageEvent) => {
+    const message = event.data as ArrivalMessage | undefined
+    if (message?.type !== 'arrival' || !store.isRecording) return
+    if (message.action === 'stop') void store.confirmArrival()
+    else if (message.action === 'still-riding') store.stillRiding()
+  })
+
+  document.addEventListener('visibilitychange', syncArrivalNotification)
 })
 
 // ---- first-run welcome sheet --------------------------------------------
@@ -77,7 +99,11 @@ const ERROR_NOTICES: ReadonlySet<NoticeKind> = new Set<NoticeKind>([
   'save-failed',
 ])
 
-const noticeText = computed(() => (store.notice ? t.notice[store.notice.kind] : null))
+const noticeText = computed(() => {
+  if (!store.notice) return null
+  const entry = t.notice[store.notice.kind]
+  return typeof entry === 'function' ? entry(store.notice.gapMs ?? 0) : entry
+})
 const noticeDetail = computed(() => store.notice?.detail ?? null)
 const noticeIsError = computed(() => (store.notice ? ERROR_NOTICES.has(store.notice.kind) : false))
 
@@ -85,6 +111,7 @@ const startBlocked = computed(() => !store.isRecording && !store.canStart)
 const nicknameMissing = computed(() => !store.isRecording && !store.contributor.trim())
 
 const hint = computed<string | null>(() => {
+  if (store.arrival) return null
   if (store.isRecording) return store.hasFix ? t.record.recordingHint : t.record.findingHint
   if (startBlocked.value || store.notice || store.receipt) return null
   return t.record.readyHint
@@ -98,6 +125,39 @@ watch(
   () => store.hasFix,
   (hasFix, hadFix) => {
     if (hasFix && !hadFix && store.isRecording) navigator.vibrate?.(200)
+  },
+)
+
+// ---- "Have we arrived?" ---------------------------------------------------
+const ARRIVAL_VIBRATION = [300, 120, 300, 120, 600]
+
+const stationaryMinutes = computed(() => Math.max(1, Math.round(store.stationaryMs / 60_000)))
+
+/**
+ * The system notification mirrors the in-app card, but only while the page
+ * is hidden: on screen the card is enough, and answering it closes the
+ * notification. Called when the question opens or closes and whenever the
+ * page's visibility changes, which covers both "asked while in another app"
+ * and "asked on screen, then put the phone away".
+ */
+function syncArrivalNotification(): void {
+  if (store.arrival && document.visibilityState !== 'visible') {
+    void showArrivalNotification({
+      title: t.arrival.notificationTitle,
+      body: t.arrival.notificationBody(stationaryMinutes.value),
+      stop: t.arrival.notificationStop,
+      stillRiding: t.arrival.notificationStillRiding,
+    })
+  } else {
+    void closeArrivalNotification()
+  }
+}
+
+watch(
+  () => store.arrival,
+  (prompt) => {
+    if (prompt) navigator.vibrate?.(ARRIVAL_VIBRATION)
+    syncArrivalNotification()
   },
 )
 
@@ -124,6 +184,10 @@ function onRecordPress(): void {
     nicknameInput.value?.focus()
     return
   }
+  // Asked once, from this tap, and only when location is already granted so
+  // that two permission prompts never stack on a first ride. Any answer is
+  // fine: without it the question is asked on screen only.
+  if (store.locationGranted && shouldAskForNotifications()) askForNotifications()
   void store.start()
 }
 </script>
@@ -205,6 +269,25 @@ function onRecordPress(): void {
       </p>
 
       <p v-if="hint" class="hint">{{ hint }}</p>
+
+      <div
+        v-if="store.arrival"
+        class="arrival"
+        role="alertdialog"
+        aria-live="assertive"
+        :aria-label="t.arrival.title"
+      >
+        <p class="arrival__title">{{ t.arrival.title }}</p>
+        <p class="arrival__body">{{ t.arrival.body(stationaryMinutes) }}</p>
+        <div class="arrival__actions">
+          <button type="button" class="btn btn--primary" @click="store.confirmArrival()">
+            {{ t.arrival.stop }}
+          </button>
+          <button type="button" class="btn" @click="store.stillRiding()">
+            {{ t.arrival.stillRiding }}
+          </button>
+        </div>
+      </div>
 
       <button
         class="record"
@@ -408,6 +491,41 @@ function onRecordPress(): void {
   font-size: 0.9rem;
   color: var(--text-muted);
   text-align: center;
+}
+
+.arrival {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+  background: rgb(251 191 36 / 8%);
+}
+
+.arrival__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.arrival__body {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.arrival__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+.arrival__actions .btn {
+  flex: 1;
+  min-height: 2.75rem;
 }
 
 .record {
