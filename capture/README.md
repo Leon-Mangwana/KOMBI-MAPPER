@@ -65,9 +65,9 @@ locally and on Netlify alike. Refreshing the map means replacing the copy in
 
 Contributors are strangers with a phone, so the app explains itself once: a
 welcome sheet (`src/components/WelcomeSheet.vue`, a native `<dialog>`) says what
-the app is for, gives three steps — Start when the kombi pulls off, keep the
-page open, Stop when you get off — asks for a nickname, and says who can see
-the data. It is remembered under `localStorage` key `kombi-capture:welcome:v1`
+the app is for, gives four steps — Start when the kombi pulls off, you can use
+other apps (with the iPhone caveat), Stop when you get off, and the app asks if
+you forget — asks for a nickname, and says who can see the data. It is remembered under `localStorage` key `kombi-capture:welcome:v1`
 and reopened with the **?** button in the header. On Android Chrome it also
 offers **Install app** (via `beforeinstallprompt`, `src/lib/install.ts`);
 elsewhere it shows an add-to-home-screen tip unless already installed.
@@ -128,6 +128,50 @@ with it. Every position is written to IndexedDB (via `idb`) as it arrives:
 - Start is guarded against a double tap, which used to create two traces and
   leave a second GPS watch running after Stop.
 
+### In the background
+
+There is no background geolocation on the web. Android Chrome freezes a hidden
+page — timers, the GPS watch, everything — after about a minute (Android 15+),
+and iOS suspends it the moment it is hidden. Three things make the best of
+that:
+
+- **Keep-alive** (`src/lib/keepAlive.ts`). Chrome does not freeze a page that
+  is audibly playing sound, so for the length of a recording the app plays a
+  20 Hz tone at `KEEP_ALIVE_GAIN` (0.01, about −40 dBFS: silent through a phone
+  speaker, counted as audio by the browser). It starts synchronously in the
+  Start tap, because an `AudioContext` needs a user gesture. While it plays,
+  the Media Session puts a *Recording your kombi ride* control in Android's
+  notification shade whose Stop ends the ride (unverified whether Chrome shows
+  it for near-silent audio). It is a workaround browser makers dislike, it may
+  stop working in a future Chrome, and it does nothing on iOS. Tune the gain on
+  a phone: raise it if fixes stop arriving after ~90 s in the background, lower
+  it (floor ≈ 0.0003) if a rider with earphones hears a hum. For trials without
+  a rebuild, `localStorage['kombi-capture:keepalive-gain']` overrides it. Note
+  it may take audio focus and pause music playing in another app.
+- **Recovery** (`resumeRecording` in the store). On every return to the
+  foreground while recording, the gap since the last fix is measured. Over
+  `RESUME_GAP_MS` (60 s) means the browser paused the page: the GPS watch is
+  restarted, since a frozen page's watch may never fire again, and a notice
+  says *Recording paused for N min while the app was in the background*. The
+  notice stays until the ride ends, because the trace has a hole in it. The
+  ticker's clock is also caught up, so the elapsed time is right at once.
+- **"Have we arrived?"** (`src/lib/stationary.ts`, pure and unit-tested). A
+  rider who got off and forgot would otherwise record their walk. The store
+  feeds every fix to a `StationaryDetector`: an anchor fix, a
+  `STATIONARY_RADIUS_M` (40 m) circle around it, and movement only once
+  `MOVE_CONFIRM_FIXES` (3) fixes in a row have left the circle, so one bad fix
+  does not restart the clock. Fixes worse than `MAX_FIX_ACCURACY_M` (50 m) are
+  ignored. After `STATIONARY_MS` (5 min) inside the circle, backed by at least
+  `MIN_STATIONARY_FIXES` (10) and with a good fix in the last `MAX_SILENCE_MS`
+  (2 min), the app asks: a card above the Stop button with a vibration, and,
+  when the page is hidden, a system notification with *Stop recording* and
+  *Still riding* buttons. The detector is evaluated on every fix and on the
+  1-second ticker, so a kombi that stops and then loses signal is still asked
+  about. *Still riding* snoozes the question until the kombi has moved on and
+  stopped again; a stop the kombi leaves withdraws an unanswered card. Nothing
+  ever stops by itself. The thresholds echo the pipeline's
+  (`cluster.STOP_EPS_M`, `clean.MAX_ACCURACY_M`).
+
 Points are stored raw — no smoothing, no accuracy filtering. Cleaning and
 outlier rejection are the pipeline's job, and it can only do them properly with
 the full observation (`accuracy_m`, `speed_mps`, timestamp).
@@ -183,6 +227,8 @@ error stays available under **Details**.
 | No Geolocation / insecure origin | *No GPS* chip and a notice explaining HTTPS is required              |
 | Offline at Stop                  | *You're offline…*; uploads the moment the connection returns         |
 | Stop with no points              | *No GPS position was found before you pressed Stop…* — nothing saved, and it says to wait for the blue dot |
+| Page frozen in the background    | On return: *Recording paused for N min…*, the GPS watch restarted, the trace has a gap |
+| Kombi still for 5 minutes        | *Have we arrived?* card with vibration; a system notification with buttons when the app is hidden |
 
 ## Data shape
 
@@ -219,8 +265,30 @@ pipeline, reprojected to EPSG:32736. See `../CLAUDE.md`.
   hourly and whenever it comes back to the foreground. Phones still running a
   build from before this existed pick it up the usual way, on their next
   launch.
+- **The service worker is hand-written** (`src/sw.ts`, vite-plugin-pwa
+  `injectManifest`), only because the arrival notification needs a
+  `notificationclick` handler and a generated worker cannot have one. It must
+  keep doing what the generated one did: precache the shell, `skipWaiting` +
+  `clientsClaim` (what `autoUpdate` means, and what `updates.ts` relies on),
+  and the navigation fallback with `/traces` kept away from the cache. It is
+  type-checked on its own against the WebWorker lib (`tsconfig.sw.json`), which
+  `npm run typecheck` and `npm run build` both run.
+- **Notification buttons** come back through the worker: `notificationclick`
+  posts `{ type: 'arrival', action }` (`src/lib/swMessages.ts`) to the open
+  page, which calls the store; *Stop* and a body tap also focus the app so the
+  receipt is seen. The permission is asked once, from the Start tap, and only
+  once location is already granted so two prompts never stack; a refusal or a
+  dismissal is never re-asked (`kombi-capture:notifications-asked`), and the
+  question is then on screen only.
+- **What works where.** Android Chrome: keep-alive, notifications with buttons,
+  the media control. iOS Safari tab: no background recording, no notifications
+  (the `Notification` interface does not exist there), the pause notice on
+  return. iOS installed to the home screen, 16.4+: notifications without
+  buttons (tapping one opens the app with the card up), still no background
+  recording. Everything degrades to the in-app card.
 - `devOptions.enabled` is on, so install and offline behaviour can be exercised
-  with `npm run dev`.
+  with `npm run dev`; `devOptions.navigateFallback` is what lets the dev worker
+  bind navigations to `index.html`.
 - Icons are SVG (`public/icon.svg`). Chrome accepts SVG for installability; add
   192px and 512px PNGs to `public/` and list them in the `manifest.icons` array
   in `vite.config.ts` if you need wider platform coverage.
@@ -243,5 +311,6 @@ npm run dev        # dev server
 npm run dev:lan    # dev server on the LAN (see the secure-context caveat above)
 npm run build      # typecheck + production build
 npm run preview    # serve the production build
-npm run typecheck  # vue-tsc --noEmit
+npm run typecheck  # vue-tsc --noEmit, plus tsc for the service worker
+npm test           # vitest: the stationary detector
 ```
