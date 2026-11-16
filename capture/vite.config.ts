@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
+      // A hand-written worker (src/sw.ts): the arrival notification needs a
+      // notificationclick handler, which a generated worker cannot have.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'icon.svg'],
@@ -26,18 +31,18 @@ export default defineConfig({
           { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         // MapLibre bundles are large; the app shell must still precache.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        // Never let the service worker answer API calls from cache — an upload
-        // must either reach the network or fail loudly so we can re-queue it.
-        navigateFallbackDenylist: [/^\/traces/],
+        // The navigation fallback and its /traces denylist live in src/sw.ts.
       },
       devOptions: {
         // Lets you exercise install + offline behaviour with `npm run dev`.
         enabled: true,
         type: 'module',
+        // The dev manifest must list the entry sw.ts binds navigations to.
+        navigateFallback: 'index.html',
       },
     }),
   ],

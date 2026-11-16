@@ -23,6 +23,8 @@ import {
   patchTrace,
   type StoredTrace,
 } from '@/lib/db'
+import { KeepAlive, type KeepAliveLabels } from '@/lib/keepAlive'
+import { StationaryDetector } from '@/lib/stationary'
 import { classifyUploadError, retryDelayMs, type UploadIssue } from '@/lib/uploadIssue'
 import { ScreenWakeLock } from '@/lib/wakeLock'
 
@@ -64,11 +66,23 @@ export type NoticeKind =
   | 'empty-ride'
   /** Start was pressed without a nickname. */
   | 'needs-nickname'
+  /** The browser froze the page in the background; the GPS watch was restarted. */
+  | 'paused-in-background'
 
 export interface Notice {
   kind: NoticeKind
   /** Technical text from the browser, shown small, untranslated. */
   detail?: string
+  /** How long recording was paused. Only with 'paused-in-background'. */
+  gapMs?: number
+}
+
+/** The rider is being asked whether the ride is over. */
+export interface ArrivalPrompt {
+  /** When the kombi stopped moving (epoch ms). */
+  since: number
+  /** When the question was put (epoch ms). */
+  askedAt: number
 }
 
 /** Confirmation of the ride that was just stopped. */
@@ -127,8 +141,27 @@ const RECEIPT_TTL_MS = 8_000
  */
 const HINT_GRACE_MS = 120_000
 
+/**
+ * A gap this long since the last fix, found on returning to the foreground,
+ * means the browser paused the page rather than the GPS going quiet.
+ */
+const RESUME_GAP_MS = 60_000
+
 /** Notices about the ride in progress; they mean nothing once it has stopped. */
 const TRANSIENT_NOTICES: ReadonlySet<NoticeKind> = new Set<NoticeKind>([
+  'no-signal',
+  'waiting',
+  'location-error',
+  'save-failed',
+  'paused-in-background',
+])
+
+/**
+ * Notices a fresh fix answers. The pause notice is deliberately not one: the
+ * trace has a hole in it, and the rider should see that even once fixes are
+ * arriving again.
+ */
+const FIX_CLEARED_NOTICES: ReadonlySet<NoticeKind> = new Set<NoticeKind>([
   'no-signal',
   'waiting',
   'location-error',
@@ -178,6 +211,12 @@ export const useRecordingStore = defineStore('recording', () => {
    * or the grace period runs out.
    */
   const awaitingHint = ref<string | null>(null)
+  /** The "Have we arrived?" question, while it is open. */
+  const arrival = ref<ArrivalPrompt | null>(null)
+  /** True while the background keep-alive tone is playing. */
+  const keepAliveActive = ref(false)
+  /** The location permission is already granted, so Start will not prompt for it. */
+  const locationGranted = ref(false)
 
   // ---- non-reactive handles ---------------------------------------------
   let watchId: number | null = null
@@ -193,6 +232,12 @@ export const useRecordingStore = defineStore('recording', () => {
   let receiptTimer: ReturnType<typeof setTimeout> | null = null
   let slowTimer: ReturnType<typeof setTimeout> | null = null
   let hintTimer: ReturnType<typeof setTimeout> | null = null
+
+  const detector = new StationaryDetector()
+  // The Android media control's Stop ends the ride like the button does.
+  const keepAlive = new KeepAlive(() => {
+    void stop()
+  })
 
   const wakeLock = new ScreenWakeLock(
     () => status.value === 'recording',
@@ -225,6 +270,11 @@ export const useRecordingStore = defineStore('recording', () => {
     return uploadIssue.value ? 'retrying' : 'waiting'
   })
 
+  /** How long the kombi has been still, while the arrival question is open. */
+  const stationaryMs = computed(() =>
+    arrival.value === null ? 0 : Math.max(0, now.value - arrival.value.since),
+  )
+
   // ---- helpers -----------------------------------------------------------
   async function refreshTraces(): Promise<void> {
     traces.value = await listTraces()
@@ -235,7 +285,22 @@ export const useRecordingStore = defineStore('recording', () => {
     now.value = Date.now()
     ticker = setInterval(() => {
       now.value = Date.now()
+      // On the clock as well as on each fix, so a kombi that stops and then
+      // loses signal (phone under a seat) is still asked about.
+      checkStationary(now.value)
     }, 1000)
+  }
+
+  /** Put, keep or withdraw the arrival question according to the detector. */
+  function checkStationary(at: number): void {
+    if (status.value !== 'recording') return
+    const verdict = detector.evaluate(at)
+    // The question was about one stop. Once the kombi has moved on it is
+    // moot; the next stop gets its own.
+    if (arrival.value !== null && arrival.value.since !== verdict.since) arrival.value = null
+    if (verdict.stationary && verdict.since !== null && arrival.value === null) {
+      arrival.value = { since: verdict.since, askedAt: at }
+    }
   }
 
   function stopTicker(): void {
@@ -319,6 +384,7 @@ export const useRecordingStore = defineStore('recording', () => {
       releaseHint()
       return
     }
+    if (status.value === 'recording') resumeRecording()
     online.value = navigator.onLine
     if (!online.value || flushing) return
     if (nextRetryAt.value !== null && Date.now() >= nextRetryAt.value) {
@@ -383,11 +449,13 @@ export const useRecordingStore = defineStore('recording', () => {
     if (!navigator.permissions?.query) return
     try {
       const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName })
+      locationGranted.value = result.state === 'granted'
       if (result.state === 'denied' && status.value !== 'recording') {
         gps.value = 'denied'
         notice.value = { kind: 'blocked' }
       }
       result.addEventListener('change', () => {
+        locationGranted.value = result.state === 'granted'
         if (result.state !== 'granted') return
         if (gps.value === 'denied') gps.value = 'idle'
         if (notice.value?.kind === 'blocked' || notice.value?.kind === 'denied') {
@@ -417,6 +485,12 @@ export const useRecordingStore = defineStore('recording', () => {
 
     starting = true
     try {
+      detector.reset()
+      arrival.value = null
+      // Before the first await: the tap is what lets audio start.
+      keepAlive.start()
+      keepAliveActive.value = keepAlive.active
+
       const trace = await createTrace(name)
       clearReceipt() // also releases a held upload
       currentTraceId.value = trace.id
@@ -441,24 +515,33 @@ export const useRecordingStore = defineStore('recording', () => {
       await refreshTraces()
     } finally {
       starting = false
+      if (status.value !== 'recording') {
+        // createTrace threw: nothing is being recorded, so nothing to keep alive.
+        keepAlive.stop()
+        keepAliveActive.value = false
+      }
     }
   }
 
   function handlePosition(position: GeolocationPosition): void {
     const { latitude, longitude, accuracy, speed } = position.coords
+    const accuracyM = Number.isFinite(accuracy) ? accuracy : null
     gps.value = 'fixed'
-    notice.value = null
+    if (notice.value && FIX_CLEARED_NOTICES.has(notice.value.kind)) notice.value = null
 
     lastPosition.value = {
       lon: longitude,
       lat: latitude,
-      accuracyM: Number.isFinite(accuracy) ? accuracy : null,
+      accuracyM,
       speedMps: speed !== null && Number.isFinite(speed) ? speed : null,
       timestamp: position.timestamp,
     }
 
     const traceId = currentTraceId.value
     if (traceId === null || status.value !== 'recording') return
+
+    detector.push({ timestamp: position.timestamp, lat: latitude, lon: longitude, accuracyM })
+    checkStationary(Date.now())
 
     // Raw points go to disk unfiltered — smoothing and outlier rejection are
     // the pipeline's job, and it can only do them with the full observation.
@@ -514,6 +597,10 @@ export const useRecordingStore = defineStore('recording', () => {
     status.value = 'idle'
     stopWatch()
     stopTicker()
+    keepAlive.stop()
+    keepAliveActive.value = false
+    detector.reset()
+    arrival.value = null
     await wakeLock.release()
 
     const traceId = currentTraceId.value
@@ -564,6 +651,50 @@ export const useRecordingStore = defineStore('recording', () => {
   /** "Skip": upload without a hint. */
   function skipHint(): void {
     releaseHint()
+  }
+
+  /** "Yes, we've arrived": end the ride. */
+  async function confirmArrival(): Promise<void> {
+    arrival.value = null
+    await stop()
+  }
+
+  /** "Still riding": no more questions about this stop; ask again at the next. */
+  function stillRiding(): void {
+    detector.snooze()
+    arrival.value = null
+  }
+
+  /** The media control's text comes from the component, which owns the strings. */
+  function setMediaLabels(labels: KeepAliveLabels): void {
+    keepAlive.setLabels(labels)
+  }
+
+  /**
+   * Back in the foreground. The browser may have frozen the page meanwhile:
+   * timers stall, and a frozen page's GPS watch may never fire again. A long
+   * gap since the last fix is the sign; the cure is a fresh watch and a
+   * notice that the trace has a hole.
+   */
+  function resumeRecording(): void {
+    const resumedAt = Date.now()
+    now.value = resumedAt // the ticker was throttled; catch the clock up now
+    keepAlive.resume()
+
+    const lastSeen = lastPosition.value?.timestamp ?? startedAt.value ?? resumedAt
+    const gapMs = resumedAt - lastSeen
+    if (gapMs >= RESUME_GAP_MS) {
+      stopWatch()
+      watchId = navigator.geolocation.watchPosition(
+        handlePosition,
+        handleGeolocationError,
+        GEOLOCATION_OPTIONS,
+      )
+      notice.value = { kind: 'paused-in-background', gapMs }
+    }
+    // If the kombi had already stopped before the pause, the detector's anchor
+    // is still there, and the first fix back answers the question.
+    checkStationary(resumedAt)
   }
 
   /**
@@ -723,6 +854,9 @@ export const useRecordingStore = defineStore('recording', () => {
     receipt,
     nextRetryAt,
     awaitingHint,
+    arrival,
+    keepAliveActive,
+    locationGranted,
     // getters
     isRecording,
     elapsedMs,
@@ -732,6 +866,7 @@ export const useRecordingStore = defineStore('recording', () => {
     uploadedCount,
     hasFix,
     uploadPhase,
+    stationaryMs,
     // actions
     init,
     start,
@@ -743,5 +878,8 @@ export const useRecordingStore = defineStore('recording', () => {
     setContributor,
     saveHint,
     skipHint,
+    confirmArrival,
+    stillRiding,
+    setMediaLabels,
   }
 })

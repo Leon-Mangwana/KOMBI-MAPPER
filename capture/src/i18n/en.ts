@@ -21,6 +21,11 @@ function rideDuration(durationMs: number): string {
   return minutes < 1 ? 'under a minute' : `${minutes} min`
 }
 
+function pausedFor(ms: number): string {
+  const minutes = Math.round(ms / 60_000)
+  return minutes < 1 ? `${Math.round(ms / 1000)} s` : `${minutes} min`
+}
+
 function savedOnPhone(n: number): string {
   return n <= 1 ? 'Your ride is saved on this phone' : 'Your rides are saved on this phone'
 }
@@ -57,7 +62,7 @@ export const en = {
     // Until the first fix nothing is being recorded; pressing Stop now loses
     // the ride, so say what to wait for.
     findingHint: 'Finding GPS… Keep this page open. Recording starts when the blue dot appears.',
-    recordingHint: 'GPS ready. Keep this page open and press Stop when you get off.',
+    recordingHint: 'GPS ready. Press Stop when you get off.',
     privacy: 'Only the project team sees nicknames and individual rides.',
   },
 
@@ -77,7 +82,9 @@ export const en = {
     'empty-ride':
       'No GPS position was found before you pressed Stop, so nothing was saved. Next time, wait for the blue dot. Outside or near a window is quickest.',
     'needs-nickname': 'Add a nickname before you start.',
-  } satisfies Record<NoticeKind, string>,
+    'paused-in-background': (gapMs: number) =>
+      `Recording paused for ${pausedFor(gapMs)} while the app was in the background. It has restarted, so the trace has a gap.`,
+  } satisfies Record<NoticeKind, string | ((gapMs: number) => string)>,
 
   receipt: {
     saved: 'Ride saved',
@@ -94,6 +101,28 @@ export const en = {
     placeholder: 'e.g. Mbare – Copacabana, or Route 4',
     save: 'Save',
     skip: 'Skip',
+  },
+
+  // Asked when the kombi has not moved for a while, so a rider who has got
+  // off does not keep recording their walk. On screen, and as a system
+  // notification when the app is in the background.
+  arrival: {
+    title: 'Have we arrived?',
+    body: (minutes: number) =>
+      `The kombi hasn't moved for ${minutes} min. If you've got off, stop recording.`,
+    stop: 'Yes, stop recording',
+    stillRiding: 'Still riding',
+    notificationTitle: 'Have we arrived?',
+    notificationBody: (minutes: number) =>
+      `The kombi hasn't moved for ${minutes} min. Stop recording if you've got off.`,
+    notificationStop: 'Stop recording',
+    notificationStillRiding: 'Still riding',
+  },
+
+  // The Android media control shown while the background keep-alive plays.
+  keepAlive: {
+    title: 'Recording your kombi ride',
+    artist: 'Kombi Capture',
   },
 
   upload: {
@@ -157,12 +186,16 @@ export const en = {
         body: 'Your phone will ask to use your location. Tap Allow. Recording starts when the blue dot appears.',
       },
       {
-        title: 'Keep this page open',
-        body: 'Leave the screen on until you get off. The app keeps your screen awake while it records.',
+        title: 'You can use other apps',
+        body: 'On Android the app keeps recording in the background by playing a silent sound, and keeps the screen awake while it is open. On iPhone keep this page open: recording pauses while it is hidden.',
       },
       {
         title: 'Press Stop when you get off',
         body: "Your ride is saved on this phone and uploads by itself. If you're offline, it uploads the next time you open the app online.",
+      },
+      {
+        title: 'Forgot? The app will ask',
+        body: "If the kombi stops for five minutes, the app asks whether you've arrived, on screen and as a notification. Nothing stops until you say so.",
       },
     ],
     nickname: 'Nickname',

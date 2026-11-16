@@ -26,5 +26,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"],
+  // The service worker is checked separately, against the WebWorker lib
+  // (tsconfig.sw.json), so DOM globals never leak into it or vice versa.
+  "exclude": ["src/sw.ts"]
 }
