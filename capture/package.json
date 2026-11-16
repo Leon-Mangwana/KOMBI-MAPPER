@@ -10,9 +10,11 @@
     "predev:lan": "npm run basemap",
     "dev:lan": "vite --host",
     "prebuild": "npm run basemap",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && tsc -p tsconfig.sw.json --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit && tsc -p tsconfig.sw.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "idb": "^8.0.3",
@@ -27,6 +29,10 @@
     "typescript": "~5.8.3",
     "vite": "^7.0.5",
     "vite-plugin-pwa": "^1.0.1",
-    "vue-tsc": "^3.0.1"
+    "vitest": "^5.1.0",
+    "vue-tsc": "^3.0.1",
+    "workbox-core": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1"
   }
 }
