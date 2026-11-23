@@ -67,6 +67,9 @@ Interactive docs at http://localhost:8000/docs.
 - `PATCH /routes/{id}` — **operator-only.** Set or clear `short_name` /
   `long_name`. An omitted field is left alone; an explicit `null` clears it.
 - `PATCH /stops/{id}` — **operator-only.** Set or clear `name`.
+- `GET /admin/check` — **operator-only.** `{"status": "ok"}` if the token is
+  right, otherwise the usual 401 or 503. Touches no database; the web map calls
+  it when an operator pastes a token, so a typo is reported at once.
 - `GET /gtfs.zip` — the exported GTFS feed. See below.
 
 The network endpoints answer with GeoJSON because that is what MapLibre takes as
