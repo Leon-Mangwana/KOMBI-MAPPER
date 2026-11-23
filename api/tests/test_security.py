@@ -181,6 +181,7 @@ def test_public_endpoints_need_no_token():
     ("method", "path", "body"),
     [
         ("get", "/traces/1", None),
+        ("get", "/admin/check", None),
         ("get", "/routes/1/hints", None),
         ("patch", "/routes/1", {"short_name": "A"}),
         ("patch", "/stops/1", {"name": "Copacabana"}),
@@ -208,6 +209,22 @@ def test_naming_is_refused_when_no_token_is_configured(monkeypatch):
     resp = client.patch("/routes/1", json={"short_name": "A"})
 
     assert resp.status_code == 503
+
+
+def test_token_check_admits_the_right_token(monkeypatch):
+    """The web map calls this on unlock; it must not need a database."""
+    monkeypatch.setattr(settings, "admin_token", "s3cret")
+
+    resp = client.get("/admin/check", headers={"X-Admin-Token": "s3cret"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_token_check_is_unavailable_when_no_token_is_configured(monkeypatch):
+    monkeypatch.setattr(settings, "admin_token", "")
+
+    assert client.get("/admin/check").status_code == 503
 
 
 # --------------------------------------------------------------------------
