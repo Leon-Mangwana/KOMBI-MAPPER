@@ -24,6 +24,7 @@ import {
   type StopFeature,
 } from '@/lib/api'
 import { isNamed, routeName } from '@/lib/format'
+import { nextUnnamedId } from '@/lib/naming'
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -65,6 +66,11 @@ export const useNetworkStore = defineStore('network', () => {
         if (isNamed(a)) return routeName(a).localeCompare(routeName(b))
         return a.id - b.id
       }),
+  )
+
+  /** The routes still waiting for a person to name them, in list order. */
+  const unnamedRoutes = computed<RouteProperties[]>(() =>
+    orderedRoutes.value.filter((route) => !isNamed(route)),
   )
 
   const selectedRoute = computed<RouteProperties | null>(
@@ -147,6 +153,19 @@ export const useNetworkStore = defineStore('network', () => {
   }
 
   /**
+   * Move the naming pass along: select the unnamed route after the current one.
+   *
+   * A route that was just named has already left `unnamedRoutes`, because
+   * `renameRoute` folds the server's answer into `routes`, so "next" from it
+   * is simply the first unnamed route still waiting. Does nothing once every
+   * route is named.
+   */
+  function selectNextUnnamed(): void {
+    const id = nextUnnamedId(orderedRoutes.value, selectedId.value)
+    if (id !== null) void select(id)
+  }
+
+  /**
    * Rename a route, and fold the server's answer back into what is on screen.
    *
    * The response is the updated feature, so the list, the map and the cached
@@ -209,6 +228,7 @@ export const useNetworkStore = defineStore('network', () => {
     routeCollection,
     stopCollection,
     orderedRoutes,
+    unnamedRoutes,
     selectedRoute,
     selectedStops,
     selectedStopIds,
@@ -217,6 +237,7 @@ export const useNetworkStore = defineStore('network', () => {
     load,
     select,
     clearSelection,
+    selectNextUnnamed,
     renameRoute,
     renameStop,
   }
