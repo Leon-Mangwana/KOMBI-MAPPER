@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
-import { fetchRouteHints, type RouteHint } from '@/lib/api'
+import { fetchRouteHints, type RouteHint, type RouteStop } from '@/lib/api'
 import { formatLength, plural, routeName, stopName } from '@/lib/format'
 import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
@@ -10,6 +10,9 @@ const store = useNetworkStore()
 const admin = useAdminStore()
 
 const query = ref('')
+
+/** Operator's list filter: only the routes still waiting for a name. */
+const unnamedOnly = ref(false)
 
 // --- Naming ---------------------------------------------------------------
 // Only reachable in operator mode; see stores/admin.ts.
@@ -28,9 +31,20 @@ watch(
     longName.value = route?.long_name ?? ''
     saveError.value = null
     saved.value = false
+    stopState.value = new Map()
   },
   { immediate: true },
 )
+
+/** Whether the name fields differ from what is saved. Guards "Next unnamed". */
+const dirty = computed(() => {
+  const route = store.selectedRoute
+  if (!route) return false
+  return (
+    (shortName.value.trim() || null) !== route.short_name ||
+    (longName.value.trim() || null) !== route.long_name
+  )
+})
 
 async function saveNames(): Promise<void> {
   const route = store.selectedRoute
@@ -54,12 +68,38 @@ async function saveNames(): Promise<void> {
   }
 }
 
-async function saveStopName(stopId: number, value: string): Promise<void> {
-  saveError.value = null
+// Per-stop feedback. The inputs save on blur, one at a time, so each needs
+// its own "saving / saved / failed" rather than a line shared with the form.
+type StopState = { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string }
+
+const stopState = ref<Map<number, StopState>>(new Map())
+
+function setStopState(stopId: number, state: StopState | null): void {
+  const next = new Map(stopState.value)
+  if (state) next.set(stopId, state)
+  else next.delete(stopId)
+  stopState.value = next
+}
+
+function stopStatus(stopId: number): StopState | undefined {
+  return stopState.value.get(stopId)
+}
+
+async function saveStopName(stop: RouteStop, value: string): Promise<void> {
+  const name = value.trim() || null
+  // Blur fires whether or not anything was typed; an unchanged name is not a
+  // request, and would otherwise flash "Saved" for nothing.
+  if (name === stop.name) {
+    setStopState(stop.id, null)
+    return
+  }
+
+  setStopState(stop.id, { kind: 'saving' })
   try {
-    await store.renameStop(stopId, value.trim() || null, admin.token)
+    await store.renameStop(stop.id, name, admin.token)
+    setStopState(stop.id, { kind: 'saved' })
   } catch (error) {
-    saveError.value = describe(error)
+    setStopState(stop.id, { kind: 'error', message: describe(error) })
   }
 }
 
@@ -121,8 +161,9 @@ function describe(error: unknown): string {
  */
 const matches = computed(() => {
   const needle = query.value.trim().toLowerCase()
-  if (!needle) return store.orderedRoutes
-  return store.orderedRoutes.filter((route) => routeName(route).toLowerCase().includes(needle))
+  const pool = unnamedOnly.value && admin.active ? store.unnamedRoutes : store.orderedRoutes
+  if (!needle) return pool
+  return pool.filter((route) => routeName(route).toLowerCase().includes(needle))
 })
 </script>
 
@@ -186,6 +227,23 @@ const matches = computed(() => {
           </button>
           <p v-if="saveError" class="naming__error" role="alert">{{ saveError }}</p>
           <p v-else-if="saved" class="naming__ok" role="status">Saved.</p>
+
+          <!-- The naming pass: on to the next route still waiting for a name.
+               Held while the form has edits, so a half-typed name is not lost. -->
+          <div class="naming__next">
+            <button
+              v-if="store.unnamedRoutes.length"
+              type="button"
+              class="naming__next-btn"
+              :disabled="dirty"
+              :title="dirty ? 'Save or clear your changes first' : undefined"
+              @click="store.selectNextUnnamed()"
+            >
+              Next unnamed route →
+              <span class="naming__next-count">{{ store.unnamedRoutes.length }} left</span>
+            </button>
+            <p v-else class="naming__ok">Every route is named.</p>
+          </div>
         </form>
 
         <p v-if="store.detailLoading" class="panel__hint">Loading stops…</p>
@@ -196,14 +254,36 @@ const matches = computed(() => {
 
             <!-- Named in place: an operator is looking at the map to work out
                  which kerb this is, so the edit belongs next to it. -->
-            <input
-              v-if="admin.active"
-              class="stops__input"
-              :value="stop.name ?? ''"
-              :placeholder="stopName(null, index)"
-              maxlength="255"
-              @change="saveStopName(stop.id, ($event.target as HTMLInputElement).value)"
-            />
+            <template v-if="admin.active">
+              <input
+                class="stops__input"
+                :value="stop.name ?? ''"
+                :placeholder="stopName(null, index)"
+                maxlength="255"
+                @change="saveStopName(stop, ($event.target as HTMLInputElement).value)"
+              />
+              <span
+                v-if="stopStatus(stop.id)?.kind === 'saving'"
+                class="stops__status"
+                role="status"
+              >
+                Saving…
+              </span>
+              <span
+                v-else-if="stopStatus(stop.id)?.kind === 'saved'"
+                class="stops__status stops__status--ok"
+                role="status"
+              >
+                ✓ Saved
+              </span>
+              <span
+                v-else-if="stopStatus(stop.id)?.kind === 'error'"
+                class="stops__status stops__status--error"
+                role="alert"
+              >
+                {{ (stopStatus(stop.id) as { message: string }).message }}
+              </span>
+            </template>
             <span v-else class="stops__name">{{ stopName(stop.name, index) }}</span>
           </li>
         </ol>
@@ -221,6 +301,7 @@ const matches = computed(() => {
         <h2 class="panel__title">Routes</h2>
         <p class="panel__totals">
           {{ plural(store.totals.routes, 'route') }} · {{ plural(store.totals.stops, 'stop') }}
+          <template v-if="admin.active"> · {{ store.unnamedRoutes.length }} unnamed</template>
         </p>
         <input
           v-model="query"
@@ -229,6 +310,10 @@ const matches = computed(() => {
           placeholder="Search routes"
           aria-label="Search routes"
         />
+        <label v-if="admin.active" class="panel__filter">
+          <input v-model="unnamedOnly" type="checkbox" />
+          Unnamed only ({{ store.unnamedRoutes.length }})
+        </label>
       </div>
 
       <div class="panel__body">
@@ -236,6 +321,10 @@ const matches = computed(() => {
 
         <p v-else-if="!matches.length && query" class="panel__hint">
           Nothing matches “{{ query }}”.
+        </p>
+
+        <p v-else-if="!matches.length && unnamedOnly" class="panel__hint">
+          Every route is named.
         </p>
 
         <ul v-else class="routes">
@@ -300,6 +389,15 @@ const matches = computed(() => {
 
 .panel__search::placeholder {
   color: var(--text-muted);
+}
+
+.panel__filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
 
 .panel__back {
@@ -504,6 +602,56 @@ const matches = computed(() => {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.naming__next {
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.naming__next-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.naming__next-btn:hover:not(:disabled),
+.naming__next-btn:focus-visible {
+  border-color: var(--accent);
+}
+
+.naming__next-btn:disabled {
+  opacity: 0.5;
+}
+
+.naming__next-count {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.stops__status {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.stops__status--ok {
+  color: var(--accent);
+}
+
+.stops__status--error {
+  color: var(--danger);
+  white-space: normal;
 }
 
 .stops__input {
