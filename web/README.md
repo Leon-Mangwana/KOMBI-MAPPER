@@ -106,13 +106,24 @@ supply them. Doing that for thirty routes through `curl` is how it does not get
 done, so the app has a naming UI:
 
 1. Open the site with `#admin` on the end of the URL.
-2. Paste the API's `ADMIN_TOKEN` and unlock.
+2. Paste the API's `ADMIN_TOKEN` and unlock. The token is checked against the
+   API (`GET /admin/check`) before anything unlocks, so a typo is reported in
+   the banner at once: *That admin token was rejected* means the token is
+   wrong, *Naming is disabled on the server* means the API has no
+   `ADMIN_TOKEN` set.
 3. Select a route: its short and long name become editable, and each stop in the
-   list becomes an inline text box. Changes save on submit and on blur.
+   list becomes an inline text box. Names save on submit; a stop saves on blur,
+   shows a *Saved* tick beside it (or the error, if it failed), and an unchanged
+   value is not sent at all.
 4. Under the name fields, *Riders called this route* lists what contributors
    typed after Stop in the capture app, with how many said each. Clicking one
    fills a name field (a bare number or "Route 4" goes to the short name,
    anything wordier to the long name); it is still only saved on submit.
+5. Naming is a pass over the unnamed routes. The list shows how many are left
+   and has an *Unnamed only* filter; under the name form, *Next unnamed route*
+   jumps to the next one in list order (wrapping round), and is disabled while
+   the form has unsaved edits. A route just named has already left the unnamed
+   list, so *Next* after a save is the right next.
 
 Hiding the controls behind `#admin` is **not** the security boundary — the API
 checks the token on every write, and refuses without it. It keeps the public map
@@ -146,6 +157,7 @@ computes a distance — see [../CLAUDE.md](../CLAUDE.md).
 | `npm run build`     | Type-check, then build to `dist/`     |
 | `npm run preview`   | Serve the build on port 4174          |
 | `npm run typecheck` | `vue-tsc --noEmit`                    |
+| `npm test`          | vitest: the next-unnamed-route helper |
 
 ## Notes
 
