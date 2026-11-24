@@ -41,9 +41,10 @@ onMounted(() => {
   void checkFeed()
 })
 
-function signIn(): void {
-  admin.signIn(tokenEntry.value)
-  tokenEntry.value = ''
+async function signIn(): Promise<void> {
+  // The entry is only cleared once the API has accepted it, so a mistyped
+  // token stays in the box to be corrected rather than retyped.
+  if (await admin.signIn(tokenEntry.value)) tokenEntry.value = ''
 }
 </script>
 
@@ -74,8 +75,12 @@ function signIn(): void {
           class="admin-form__input"
           placeholder="Admin token"
           aria-label="Admin token"
+          :disabled="admin.checking"
         />
-        <button type="submit" class="banner__retry">Unlock naming</button>
+        <button type="submit" class="banner__retry" :disabled="admin.checking">
+          {{ admin.checking ? 'Checking…' : 'Unlock naming' }}
+        </button>
+        <span v-if="admin.error" class="admin-form__error" role="alert">{{ admin.error }}</span>
       </form>
     </div>
 
@@ -164,8 +169,13 @@ function signIn(): void {
 
 .admin-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.admin-form__error {
+  color: var(--danger);
 }
 
 .admin-form__input {

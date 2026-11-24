@@ -106,6 +106,16 @@ export async function fetchRouteHints(
   return body.hints
 }
 
+/**
+ * Whether a token is the operator token. Resolves if it is; throws `ApiError`
+ * with status 401 (wrong), 503 (no token configured on the server) or null
+ * (unreachable) if not. Touches no database on the server, so it answers even
+ * when the network endpoints are failing.
+ */
+export async function checkAdminToken(token: string): Promise<void> {
+  await getJson<{ status: string }>('/admin/check', undefined, { 'X-Admin-Token': token })
+}
+
 /** Names an operator can set on a route. Omit a field to leave it unchanged. */
 export interface RouteNames {
   short_name?: string | null
