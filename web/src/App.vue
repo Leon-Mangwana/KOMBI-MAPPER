@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 
 import MapView from '@/components/MapView.vue'
 import RoutePanel from '@/components/RoutePanel.vue'
 import { gtfsUrl } from '@/lib/api'
+import { routeIdFromSearch, searchWithRoute } from '@/lib/routeLink'
 import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
 
@@ -35,8 +36,42 @@ async function checkFeed(): Promise<void> {
   }
 }
 
+// ---- The route in the address bar ----------------------------------------
+// `?route=12` is a link to one route (see lib/routeLink.ts). On load the
+// selection is restored from it, and from then on the address follows the
+// selection, so what is in the bar is always copyable. `replaceState`, not
+// `pushState`: selecting routes is browsing one page, and Back should leave
+// the site rather than step through every route looked at.
+
+/** Load the network, then select whatever route the address asked for. */
+async function loadNetwork(): Promise<void> {
+  await store.load()
+  if (store.status !== 'ready') return
+
+  const wanted = routeIdFromSearch(window.location.search)
+  if (wanted === null) return
+  // Clustering can renumber routes, so an old link may name one that is gone.
+  // Then the parameter is dropped, through the watcher below, rather than
+  // left pointing at nothing.
+  const exists = store.routes.some((feature) => feature.properties.id === wanted)
+  if (exists) void store.select(wanted)
+  // The selection is already null, so the watcher below would not fire: the
+  // stale parameter has to be dropped from here.
+  else syncAddress(null)
+}
+
+/** Make the address bar say what is selected, touching history only on a change. */
+function syncAddress(id: number | null): void {
+  const search = searchWithRoute(window.location.search, id)
+  const next = `${window.location.pathname}${search}${window.location.hash}`
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (next !== current) window.history.replaceState(window.history.state, '', next)
+}
+
+watch(() => store.selectedId, syncAddress)
+
 onMounted(() => {
-  void store.load()
+  void loadNetwork()
   admin.watchHash()
   void checkFeed()
 })
@@ -86,7 +121,7 @@ async function signIn(): Promise<void> {
 
     <p v-if="store.status === 'error'" class="banner banner--error" role="alert">
       {{ store.error }}
-      <button type="button" class="banner__retry" @click="store.load()">Retry</button>
+      <button type="button" class="banner__retry" @click="loadNetwork()">Retry</button>
     </p>
 
     <main class="main">

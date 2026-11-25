@@ -230,7 +230,10 @@ onMounted(() => {
     bindInteractions()
     syncData()
     syncSelection()
-    frameNetwork()
+    // A route may already be selected when the style lands — the page was
+    // opened from a link to it — and then the view belongs to that route.
+    if (store.selectedId === null) frameNetwork()
+    else frameSelection()
   })
 })
 

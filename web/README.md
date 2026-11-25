@@ -93,6 +93,18 @@ answers `GET` only.
 Selecting a route — from the map or the list — fetches `GET /routes/{id}` for
 its ordered stops and frames it. Clicking the background clears the selection.
 
+### Linking to a route
+
+The selected route is in the address bar as `?route=12`, so the address can be
+sent to somebody and opens the map with that route selected and framed. *Copy
+link* at the top of the route panel puts it on the clipboard (and shows it to
+copy by hand if the clipboard is refused). The link carries only the route: a
+link copied in operator mode does not include `#admin`. A link to a route that
+no longer exists — clustering can renumber routes — opens the plain map and
+drops the parameter. The address is updated with `replaceState`, so Back leaves
+the site rather than stepping through every route looked at. Parsing and
+formatting live in `src/lib/routeLink.ts`, unit-tested.
+
 Route and stop names come from `routes.short_name`, `routes.long_name` and
 `stops.name`, which **clustering cannot fill in**: a cluster of GPS traces has
 no idea it is the Mbare route. Until somebody names them by hand the app falls
@@ -157,7 +169,7 @@ computes a distance — see [../CLAUDE.md](../CLAUDE.md).
 | `npm run build`     | Type-check, then build to `dist/`     |
 | `npm run preview`   | Serve the build on port 4174          |
 | `npm run typecheck` | `vue-tsc --noEmit`                    |
-| `npm test`          | vitest: the next-unnamed-route helper |
+| `npm test`          | vitest: pure helpers in `src/lib`     |
 
 ## Notes
 
