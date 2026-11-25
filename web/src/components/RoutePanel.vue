@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 
 import { fetchRouteHints, type RouteHint, type RouteStop } from '@/lib/api'
 import { formatLength, plural, routeName, stopName } from '@/lib/format'
+import { shareUrl } from '@/lib/routeLink'
 import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
 
@@ -13,6 +14,34 @@ const query = ref('')
 
 /** Operator's list filter: only the routes still waiting for a name. */
 const unnamedOnly = ref(false)
+
+// --- Sharing --------------------------------------------------------------
+// The address bar already holds the link (App.vue keeps it there); this puts
+// it on the clipboard without the visitor having to find the bar on a phone.
+
+type CopyState = 'idle' | 'copied' | 'failed'
+const copyState = ref<CopyState>('idle')
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+
+const shareLink = computed(() =>
+  store.selectedRoute
+    ? shareUrl(window.location.origin, window.location.pathname, store.selectedRoute.id)
+    : '',
+)
+
+async function copyLink(): Promise<void> {
+  if (!shareLink.value) return
+  try {
+    await navigator.clipboard.writeText(shareLink.value)
+    copyState.value = 'copied'
+  } catch {
+    // No clipboard permission, or an insecure context. The link is shown
+    // instead, so it can still be selected and copied by hand.
+    copyState.value = 'failed'
+  }
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => (copyState.value = 'idle'), 2500)
+}
 
 // --- Naming ---------------------------------------------------------------
 // Only reachable in operator mode; see stores/admin.ts.
@@ -32,6 +61,7 @@ watch(
     saveError.value = null
     saved.value = false
     stopState.value = new Map()
+    copyState.value = 'idle'
   },
   { immediate: true },
 )
@@ -171,10 +201,22 @@ const matches = computed(() => {
   <aside class="panel">
     <!-- Detail: one route and the stops along it. -->
     <template v-if="store.selectedRoute">
-      <div class="panel__head">
+      <div class="panel__head panel__head--detail">
         <button type="button" class="panel__back" @click="store.clearSelection()">
           ← All routes
         </button>
+        <button
+          type="button"
+          class="panel__share"
+          :title="shareLink"
+          :aria-label="`Copy a link to ${routeName(store.selectedRoute)}`"
+          @click="copyLink"
+        >
+          {{ copyState === 'copied' ? '✓ Copied' : 'Copy link' }}
+        </button>
+        <p v-if="copyState === 'failed'" class="panel__share-fallback" role="alert">
+          Could not copy. The link is: <code>{{ shareLink }}</code>
+        </p>
       </div>
 
       <div class="panel__body">
@@ -407,6 +449,38 @@ const matches = computed(() => {
   color: var(--accent);
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.panel__head--detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.panel__share {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.panel__share:hover,
+.panel__share:focus-visible {
+  border-color: var(--accent);
+}
+
+.panel__share-fallback {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .panel__body {
