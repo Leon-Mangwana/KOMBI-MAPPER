@@ -73,9 +73,15 @@ offers **Install app** (via `beforeinstallprompt`, `src/lib/install.ts`);
 elsewhere it shows an add-to-home-screen tip unless already installed.
 
 The nickname is required, so the team can tell contributors apart, but it does
-not need to be a real name. The privacy line is accurate: raw traces
-(`GET /traces/{id}`) are operator-only on the API, and the public endpoints
-serve only clustered routes and stops.
+not need to be a real name. The privacy paragraph is accurate and must stay so:
+a ride is the GPS positions with their times, accuracy and speed, plus the
+nickname and an optional route hint; raw traces (`GET /traces/{id}`) are
+operator-only on the API, and the public endpoints serve only clustered routes
+and stops. Under it, when `VITE_CONTACT_URL` is set (a `https://wa.me/<number>`
+or `mailto:` link, in `netlify.toml`), a line offers *Message the project team*
+for problems and removal requests; unset, the line is hidden rather than left
+pointing nowhere. The public map has the fuller version of the same text in its
+*About this map & privacy* dialog.
 
 ## Strings
 
