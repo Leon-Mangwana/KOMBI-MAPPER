@@ -126,6 +126,19 @@ per directory, triggered only by changes under it. The API workflow brings up a
 PostGIS service; the pipeline suite deliberately needs no database, and mocks
 OSRM.
 
+## Privacy
+
+Riders contribute their own movements, so what is kept and who sees it is
+written down where they will read it: the capture app's welcome sheet and the
+public map's *About this map & privacy* dialog. In short: a ride is GPS
+positions with times, accuracy and speed, plus a nickname and an optional route
+hint; no account, phone number or device identifier. Individual rides and
+nicknames are operator-only on the API (`GET /traces/{id}` needs the admin
+token); the public endpoints, the map and the GTFS feed carry only combined
+routes and stops. Neither site sets cookies or runs analytics. Removal requests
+go to the contact link (`VITE_CONTACT_URL` in each site's `netlify.toml`). If
+any of that changes in the code, change both texts too.
+
 ## License
 
-<!-- TODO: choose a license -->
+[MIT](LICENSE).

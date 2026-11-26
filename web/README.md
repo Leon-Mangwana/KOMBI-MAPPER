@@ -111,6 +111,20 @@ no idea it is the Mbare route. Until somebody names them by hand the app falls
 back to `Route 12` / `Stop 3`, and shows unnamed routes in a lighter weight so
 the named ones read as the reviewed half of the list.
 
+## About and privacy
+
+The footer has *About this map & privacy*, a dialog
+(`src/components/AboutDialog.vue`) saying where the routes come from, that
+nothing is official, what a ride contains, who sees what (public: combined
+routes and stops only; project team: individual rides and nicknames), that the
+site sets no cookies and runs no analytics, and how to ask for a ride to be
+removed. The text describes what the code does — `GET /traces/{id}` is
+operator-only on the API — and must change when that does.
+
+*Report a problem* in the footer, and the contact line in the dialog, link to
+`VITE_CONTACT_URL` (a `https://wa.me/<number>` or `mailto:` link, set in
+`netlify.toml`). Leave it empty to hide both.
+
 ## Operator mode
 
 Route and stop names cannot be clustered — somebody who knows Harare has to

@@ -214,7 +214,9 @@ export const sn: Strings = {
     nicknameHelp: 'Any name you like. No need for your real name.',
     nicknameLocked: 'You can change your nickname after this ride.',
     privacy:
-      'Only the project team sees nicknames and individual rides. The public map only shows routes combined from many rides.',
+      'A ride is saved as the GPS positions of the trip, with your nickname. Only the project team sees rides and nicknames, and nothing is sold or shared. The public map shows only routes combined from many rides. No account, phone number or device ID is collected.',
+    removal: 'Something wrong, a question, or a ride you want removed?',
+    contactLink: 'Message the project team',
     install: 'Install app',
     installTip:
       'Tip: add this app to your home screen from your browser menu so it is one tap away.',

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 
+import AboutDialog from '@/components/AboutDialog.vue'
 import MapView from '@/components/MapView.vue'
 import RoutePanel from '@/components/RoutePanel.vue'
 import { gtfsUrl } from '@/lib/api'
+import { contactUrl } from '@/lib/contact'
 import { routeIdFromSearch, searchWithRoute } from '@/lib/routeLink'
 import { useAdminStore } from '@/stores/admin'
 import { useNetworkStore } from '@/stores/network'
@@ -12,6 +14,8 @@ const store = useNetworkStore()
 const admin = useAdminStore()
 
 const tokenEntry = ref('')
+
+const aboutOpen = ref(false)
 
 // Whether there is a feed to link to. The feed is a file the pipeline
 // exports, published separately from the network, and until the first export
@@ -137,6 +141,19 @@ async function signIn(): Promise<void> {
         </p>
       </aside>
     </main>
+
+    <!-- Where the data comes from and what is kept about riders, one tap away
+         for anyone deciding whether to trust the map or install the app. -->
+    <footer class="footer">
+      <button type="button" class="footer__link" @click="aboutOpen = true">
+        About this map &amp; privacy
+      </button>
+      <a v-if="contactUrl" class="footer__link" :href="contactUrl" target="_blank" rel="noopener">
+        Report a problem
+      </a>
+    </footer>
+
+    <AboutDialog :open="aboutOpen" @close="aboutOpen = false" />
   </div>
 </template>
 
@@ -241,6 +258,30 @@ async function signIn(): Promise<void> {
   flex: 1;
   display: flex;
   min-height: 0;
+}
+
+.footer {
+  flex: none;
+  display: flex;
+  gap: 1.25rem;
+  padding: 0.4rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.78rem;
+}
+
+.footer__link {
+  padding: 0.2rem 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: inherit;
+  text-decoration: none;
+}
+
+.footer__link:hover,
+.footer__link:focus-visible {
+  color: var(--accent);
 }
 
 .empty {
