@@ -7,6 +7,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import { availableLocales, type Locale, locale, setLocale, t } from '@/i18n'
+import { contactUrl } from '@/lib/contact'
 import { installAvailable, isStandalone, promptInstall } from '@/lib/install'
 import { useRecordingStore } from '@/stores/recording'
 
@@ -115,6 +116,13 @@ watch(() => props.open, sync)
       </label>
 
       <p class="sheet__privacy">{{ t.welcome.privacy }}</p>
+      <!-- Only with somewhere to send people: a promise of removal needs a door. -->
+      <p v-if="contactUrl" class="sheet__privacy">
+        {{ t.welcome.removal }}
+        <a class="sheet__contact" :href="contactUrl" target="_blank" rel="noopener">
+          {{ t.welcome.contactLink }}
+        </a>
+      </p>
 
       <button v-if="canInstall" type="button" class="btn sheet__install" @click="promptInstall()">
         {{ t.welcome.install }}
@@ -271,6 +279,11 @@ watch(() => props.open, sync)
   font-size: 0.9rem;
   line-height: 1.4;
   color: var(--text-muted);
+}
+
+.sheet__contact {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .sheet__install {
