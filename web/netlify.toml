@@ -26,6 +26,10 @@
   VITE_GTFS_URL = "/gtfs.zip"
   VITE_API_BASE_URL = "https://kombi-api.onrender.com"
 
+  # Where riders can report a problem: a WhatsApp link (country code, digits
+  # only, no plus) or a mailto:. Shown in the UI; leave empty to hide it.
+  VITE_CONTACT_URL = "https://wa.me/263712166861"
+
 # The app is a single page with no router, so this only matters for typos and
 # refreshes on a path — but without it those return Netlify's 404 instead of
 # the app.
