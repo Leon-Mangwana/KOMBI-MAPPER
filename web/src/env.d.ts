@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly VITE_MAP_CENTER_LON?: string
   readonly VITE_MAP_CENTER_LAT?: string
   readonly VITE_MAP_ZOOM?: string
+  readonly VITE_CONTACT_URL?: string
 }
 
 interface ImportMeta {
