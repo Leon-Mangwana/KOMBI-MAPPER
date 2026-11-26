@@ -41,6 +41,10 @@
   # background.
   VITE_PMTILES_URL = "/harare.pmtiles"
 
+  # Where riders can report a problem: a WhatsApp link (country code, digits
+  # only, no plus) or a mailto:. Shown in the UI; leave empty to hide it.
+  VITE_CONTACT_URL = "https://wa.me/263712166861"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
