@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { t } from '@/i18n'
-import { INITIAL_VIEW, resolveStyle } from '@/lib/basemap'
+import { INITIAL_VIEW, keepBasemapOffline, prepareBasemap, resolveStyle } from '@/lib/basemap'
 import { useRecordingStore } from '@/stores/recording'
 
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -16,6 +16,7 @@ const following = ref(true)
 let map: maplibregl.Map | null = null
 let marker: maplibregl.Marker | null = null
 let styleReady = false
+let disposed = false
 
 const TRACE_SOURCE = 'live-trace'
 const TRACE_LINE_LAYER = 'live-trace-line'
@@ -95,8 +96,11 @@ function recenter(): void {
   syncPosition()
 }
 
-onMounted(() => {
-  if (!container.value) return
+onMounted(async () => {
+  // A saved basemap is read from the phone first, so the map never starts on
+  // the network and then switches underneath the rider.
+  await prepareBasemap()
+  if (disposed || !container.value) return
 
   map = new maplibregl.Map({
     container: container.value,
@@ -141,9 +145,13 @@ onMounted(() => {
     syncPosition()
     syncRecordingStyle()
   })
+
+  // First paint done (or given up, offline): now save the basemap for next time.
+  map.once('idle', keepBasemapOffline)
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   marker?.remove()
   marker = null
   map?.remove()

@@ -54,6 +54,27 @@ With neither set, the map falls back to a blank background. Your position and
 the live trace still render — enough to confirm recording works, just with no
 map underneath.
 
+### Offline basemap
+
+With `VITE_PMTILES_URL`, the archive is also kept on the phone
+(`src/lib/offlineBasemap.ts`). The first time the app runs online, once the
+map has painted, the page downloads the whole file (about 6 MB for Harare)
+into Cache Storage. On every later launch it is read into memory before the
+map is created and registered with the `pmtiles://` protocol under the same
+URL, so tiles are slices of one buffer: the map works with no signal, and is
+faster with signal. Once per launch, when online, a `HEAD` request is compared
+with the saved copy (strong ETag, else length) and a changed archive is
+downloaded again for the *next* launch; the copy in use is never swapped
+mid-ride.
+
+This is page code, not the service worker's: in the precache a dropped
+download would fail the whole install, and byte ranges served from a cached
+response re-read the file per tile. Until the download has succeeded the app
+behaves as before, tiles over the network. `VITE_BASEMAP_STYLE_URL` disables
+it (a style's own sources are not saved). The check and the download need the
+`Cache` API, which is absent on an insecure LAN origin — use a tunnel, as for
+GPS.
+
 The archive itself is not committed here. `npm run dev` and `npm run build`
 first run `scripts/copy-basemap.mjs`, which copies
 `../web/public/harare.pmtiles` into `public/` (gitignored), so one committed
@@ -259,8 +280,10 @@ pipeline, reprojected to EPSG:32736. See `../CLAUDE.md`.
 ## PWA notes
 
 - `registerType: 'autoUpdate'`; the app shell is precached, so it launches
-  offline. Map tiles are **not** precached — an offline launch shows the blank
-  background style until tiles are reachable.
+  offline. The basemap is **not** in the precache; the page saves the whole
+  archive to Cache Storage after the first online run instead (see *Offline
+  basemap* above), so an offline launch before that shows the blank
+  background style.
 - **Updates.** A new deploy is fetched in the background and its service
   worker takes over the open page, but the page keeps running the code it
   loaded with. `src/lib/updates.ts` notices the takeover (`controllerchange`,
