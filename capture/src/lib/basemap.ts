@@ -9,7 +9,9 @@
  *      all a contributor strictly needs to confirm the app is working.
  */
 import maplibregl, { type FilterSpecification, type StyleSpecification } from 'maplibre-gl'
-import { Protocol } from 'pmtiles'
+import { PMTiles, Protocol } from 'pmtiles'
+
+import { keepArchiveOffline, loadSavedArchive, memorySource } from './offlineBasemap'
 
 const BACKGROUND = '#0f1729'
 const WATER = '#0b2f45'
@@ -24,13 +26,40 @@ const LINES: FilterSpecification = [
   false,
 ]
 
-let protocolRegistered = false
+let protocol: Protocol | null = null
 
-export function registerPmtilesProtocol(): void {
-  if (protocolRegistered) return
-  const protocol = new Protocol()
+export function registerPmtilesProtocol(): Protocol {
+  if (protocol) return protocol
+  protocol = new Protocol()
   maplibregl.addProtocol('pmtiles', protocol.tile)
-  protocolRegistered = true
+  return protocol
+}
+
+/**
+ * Before the map is created: if the archive is saved on this phone, serve it
+ * from memory instead of from the network (see lib/offlineBasemap.ts). The
+ * protocol resolves `pmtiles://<url>` to a registered instance by that exact
+ * URL, which is why the memory source is keyed by the configured one. With
+ * nothing saved, or a style URL instead of an archive, this is a no-op and
+ * tiles come over the network as before.
+ */
+export async function prepareBasemap(): Promise<void> {
+  const url = import.meta.env.VITE_PMTILES_URL
+  if (!url || import.meta.env.VITE_BASEMAP_STYLE_URL) return
+  const saved = await loadSavedArchive(url)
+  if (!saved) return
+  registerPmtilesProtocol().add(new PMTiles(memorySource(url, saved)))
+}
+
+/**
+ * Once the map has settled: save the archive for next time, or refresh a
+ * stale copy. Called after the first paint so the download does not compete
+ * with the tiles the rider is waiting for.
+ */
+export function keepBasemapOffline(): void {
+  const url = import.meta.env.VITE_PMTILES_URL
+  if (!url || import.meta.env.VITE_BASEMAP_STYLE_URL) return
+  void keepArchiveOffline(url)
 }
 
 function blankStyle(): StyleSpecification {
